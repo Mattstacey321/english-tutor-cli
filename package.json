@@ -1,0 +1,36 @@
+{
+  "name": "english-tutor-cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "english-tutor": "dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.tsx",
+    "build": "tsup src/index.tsx --format esm --out-dir dist --sourcemap --clean",
+    "start": "node dist/index.js",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest --run --passWithNoTests"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.22.0",
+    "better-sqlite3": "^11.10.0",
+    "ink": "^5.0.1",
+    "ink-text-input": "^5.0.1",
+    "openai": "^4.76.0",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.13.1",
+    "@types/react": "^18.3.12",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.0",
+    "tsup": "^8.4.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}
