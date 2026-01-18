@@ -18,7 +18,7 @@ export type ResolvedConfig = {
 
 const defaultModels: Record<ProviderName, string> = {
   openai: "gpt-5.2",
-  gemini: "gemini-1.5-flash",
+  gemini: "gemini-2.5-flash",
 };
 
 export const getConfigPath = () => {

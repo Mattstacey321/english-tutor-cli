@@ -6,10 +6,10 @@ export const createOpenAIProvider = (apiKey: string, model: string): TutorProvid
   const client = new OpenAI({ apiKey });
 
   return {
-    async sendMessage(history: ChatMessage[], message: string) {
+    async sendMessage(history: ChatMessage[]) {
       const completion = await client.chat.completions.create({
         model,
-        messages: [...history, { role: "user", content: message }]
+        messages: history.map(({ role, content }) => ({ role, content })),
       });
 
       return completion.choices[0]?.message?.content ?? "";

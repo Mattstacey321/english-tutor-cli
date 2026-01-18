@@ -27,18 +27,20 @@ export const createGeminiProvider = (apiKey: string, modelName: string): TutorPr
   const model = client.getGenerativeModel({ model: modelName });
 
   return {
-    async sendMessage(history: ChatMessage[], message: string) {
+    async sendMessage(history: ChatMessage[]) {
       const instructions = history
         .filter((item) => item.role === "system")
         .map((item) => item.content)
         .join("\n");
 
-      const normalizedHistory = history
-        .filter((item) => item.role !== "system")
-        .map((item) => ({
-          role: item.role === "assistant" ? "model" : item.role,
-          parts: [{ text: item.content }]
-        }));
+      // Separate the last user message to send via chat.sendMessage()
+      const conversationHistory = history.filter((item) => item.role !== "system");
+      const lastUserMessage = conversationHistory.pop();
+
+      const normalizedHistory = conversationHistory.map((item) => ({
+        role: item.role === "assistant" ? "model" : item.role,
+        parts: [{ text: item.content }]
+      }));
 
       if (instructions) {
         normalizedHistory.unshift({
@@ -53,7 +55,8 @@ export const createGeminiProvider = (apiKey: string, modelName: string): TutorPr
 
       const chat = model.startChat({ history: normalizedHistory });
 
-      const result = await chat.sendMessage(message);
+      const messageText = lastUserMessage?.content ?? "";
+      const result = await chat.sendMessage(messageText);
       return result.response.text();
     }
   };
