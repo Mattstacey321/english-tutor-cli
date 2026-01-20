@@ -5,7 +5,7 @@ export type PracticeMode = "general" | "grammar" | "vocab" | "role-play" | "flue
 const modeGuidance: Record<PracticeMode, string> = {
   general: "Balance conversation, corrections, and vocabulary suggestions.",
   grammar: "Prioritize grammar corrections with brief explanations and simple examples.",
-  vocab: "Highlight stronger vocabulary choices and collocations with 1-2 alternatives.",
+  vocab: "Focus on vocabulary. Suggest 3-5 useful words/phrases related to the topic. Format suggestions as: 📚 word1, word2, word3 (comma-separated for easy saving with /save).",
   "role-play": "Lead a role-play scenario and stay in character while correcting gently.",
   fluency: "Prioritize flow; keep corrections minimal and summarize them at the end.",
   exam: "Use IELTS/TOEFL-style prompts and give concise feedback after each reply."
