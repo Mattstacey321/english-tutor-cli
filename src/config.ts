@@ -7,12 +7,14 @@ export type TutorConfig = {
   provider: ProviderName;
   model: string;
   apiKey?: string;
+  summaryModel?: string;
 };
 
 export type ResolvedConfig = {
   provider: ProviderName;
   model: string;
   apiKey: string | null;
+  summaryModel: string | null;
   error: string | null;
 };
 
@@ -57,6 +59,7 @@ export const readConfig = (): {
         provider: parsed.provider,
         model: parsed.model,
         apiKey: parsed.apiKey,
+        summaryModel: parsed.summaryModel,
       },
       error: null,
       path: configPath,
@@ -82,6 +85,7 @@ export const resolveConfig = (config: TutorConfig | null): ResolvedConfig => {
   ).toLowerCase();
   const provider: ProviderName = rawProvider === "gemini" ? "gemini" : "openai";
   const model = process.env.MODEL ?? config?.model ?? defaultModels[provider];
+  const summaryModel = config?.summaryModel ?? null;
   const envKey =
     provider === "gemini"
       ? process.env.GEMINI_API_KEY
@@ -90,10 +94,10 @@ export const resolveConfig = (config: TutorConfig | null): ResolvedConfig => {
 
   if (!apiKey) {
     const missing = provider === "gemini" ? "GEMINI_API_KEY" : "OPENAI_API_KEY";
-    return { provider, model, apiKey: null, error: `Missing ${missing}.` };
+    return { provider, model, apiKey: null, summaryModel, error: `Missing ${missing}.` };
   }
 
-  return { provider, model, apiKey, error: null };
+  return { provider, model, apiKey, summaryModel, error: null };
 };
 
 export const defaultModelFor = (provider: ProviderName) =>
