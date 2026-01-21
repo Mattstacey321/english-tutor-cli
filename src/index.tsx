@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { randomUUID } from "node:crypto";
 import { render, Box, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
-import { updateDifficulty, type Difficulty } from "./adaptive.js";
+import { updateDifficulty } from "./adaptive.js";
 import {
   readConfig,
   resolveConfig,
@@ -14,29 +14,17 @@ import { buildTutorPrompt } from "./conversation.js";
 import { createGeminiProvider, listGeminiModels } from "./providers/gemini.js";
 import { createOpenAIProvider, listOpenAIModels } from "./providers/openai.js";
 import type { TutorProvider, ChatMessage } from "./providers/types.js";
-import {
-  saveMessage,
-  getSessionMessages,
-  getSessionHistoryWithSummaries,
-  getSessionWithSummary,
-  updateSessionSummary,
-  saveVocabItems,
-  getVocabByCollection,
-  getAllVocab,
-  getVocabStats,
-  getCollections,
-  createCollection,
-  getVocabForPractice,
-  updateVocabMastery,
-} from "./storage.js";
-import {
-  exportConversation,
-  isValidExportFormat,
-  type ExportFormat,
-} from "./export.js";
+import { saveMessage, updateVocabMastery } from "./storage.js";
 import { useTutorStore } from "./stores/tutor-store.js";
 import type { PracticeMode } from "./conversation.js";
 import { CommandPalette } from "./components/command-palette.js";
+import {
+  handleCommand,
+  availableModes,
+  type CommandContext,
+  type CommandActions,
+  type CommandResult,
+} from "./commands.js";
 import {
   ScrollableMessageList,
   type ScrollableMessageListRef,
@@ -45,9 +33,7 @@ import Spinner from "ink-spinner";
 import { SetupWizard } from "./layouts/setup-wizard.js";
 import { ErrorBoundary } from "./components/error-boundary.js";
 import { useTerminalSize } from "./hooks/use-terminal-size.js";
-import { generateSessionSummary, buildResumeContext } from "./summary.js";
 
-type CommandResult = { message: string; isError?: boolean } | null;
 type PaletteItem = {
   id: string;
   left: string;
@@ -56,19 +42,6 @@ type PaletteItem = {
   mode?: PracticeMode;
   modelName?: string;
   disabled?: boolean;
-};
-
-const availableModes: PracticeMode[] = [
-  "general",
-  "grammar",
-  "vocab",
-  "role-play",
-  "fluency",
-  "exam",
-];
-
-const formatModeHelp = () => {
-  return `Modes: ${availableModes.join(", ")}`;
 };
 
 const buildProvider = (
@@ -393,7 +366,7 @@ const App = () => {
         void openModelPalette();
         return;
       default: {
-        const result = handleCommand(command);
+        const result = runCommand(command);
         if (result) {
           addMessage({
             role: "system",
@@ -671,344 +644,34 @@ const App = () => {
   }, [providerInfo.error]);
   // Note: intentionally not including status/setStatus in deps to avoid loop
 
-  const handleCommand = (value: string): CommandResult => {
-    const [command, ...args] = value.trim().split(/\s+/);
-    switch (command) {
-      case "/help":
-        return {
-          message:
-            "Commands: /clear, /config, /difficulty, /mode, /export, /history, /resume, /summary, /save, /vocab, /models, /help\nTip: To send a message starting with /, type //",
-        };
-      case "/clear": {
-        const newSession = args.includes("--new-session");
-        resetSession(newSession);
-        return {
-          message: newSession
-            ? "Conversation cleared. Started new session."
-            : "Conversation cleared.",
-        };
-      }
-      case "/difficulty":
-      case "/diff": {
-        const validLevels: Difficulty[] = [
-          "beginner",
-          "intermediate",
-          "advanced",
-        ];
-        const requested = (args[0] ?? "").toLowerCase();
-        if (!requested) {
-          return {
-            message: `Current difficulty: ${difficulty}. Options: ${validLevels.join(", ")}`,
-          };
-        }
-        if (validLevels.includes(requested as Difficulty)) {
-          setDifficulty(requested as Difficulty);
-          return { message: `Difficulty set to ${requested}.` };
-        }
-        return {
-          message: `Unknown difficulty. Options: ${validLevels.join(", ")}`,
-          isError: true,
-        };
-      }
-      case "/mode": {
-        const requested = (args[0] ?? "").toLowerCase();
-        if (!requested) {
-          return { message: formatModeHelp() };
-        }
+  const runCommand = (value: string): CommandResult => {
+    const ctx: CommandContext = {
+      sessionId,
+      history,
+      difficulty,
+      mode,
+      resolvedConfig,
+      configState,
+      provider: providerInfo.provider,
+    };
 
-        if (availableModes.includes(requested as PracticeMode)) {
-          setMode(requested as PracticeMode);
-          return { message: `Mode set to ${requested}.` };
-        }
+    const actions: CommandActions = {
+      resetSession,
+      setDifficulty,
+      setMode,
+      setSessionId,
+      setHistory,
+      setConfigState,
+      setStatus,
+      addMessage,
+      setMainView,
+      setVocabPractice,
+      openModelPalette: async () => {
+        await openModelPalette();
+      },
+    };
 
-        return { message: `Unknown mode. ${formatModeHelp()}`, isError: true };
-      }
-      case "/export": {
-        if (history.length === 0) {
-          return { message: "No messages to export.", isError: true };
-        }
-        const formatArg = (args[0] ?? "md").toLowerCase();
-        if (!isValidExportFormat(formatArg)) {
-          return {
-            message: "Invalid format. Options: md, txt, json",
-            isError: true,
-          };
-        }
-        try {
-          const result = exportConversation(
-            history,
-            sessionId,
-            formatArg as ExportFormat,
-          );
-          return { message: `Exported to ${result.filename}` };
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : "Export failed";
-          return { message: msg, isError: true };
-        }
-      }
-      case "/history": {
-        const limit = parseInt(args[0] ?? "10", 10) || 10;
-        const sessions = getSessionHistoryWithSummaries(limit);
-        if (sessions.length === 0) {
-          return { message: "No previous sessions found." };
-        }
-        const lines = sessions.map((s) => {
-          const shortId = s.session_id.slice(0, 8);
-          const date = s.started_at.split("T")[0];
-          const summaryPreview = s.summary
-            ? s.summary.slice(0, 50) + (s.summary.length > 50 ? "..." : "")
-            : "(no summary)";
-          return `  ${shortId}  ${date}  ${String(s.message_count).padStart(3)} msgs\n    ${summaryPreview}`;
-        });
-        return {
-          message: `Recent Sessions:\n\n${lines.join("\n\n")}\n\nUse /resume <id> to continue a session.`,
-        };
-      }
-      case "/resume": {
-        const targetId = args[0];
-        if (!targetId) {
-          return { message: "Usage: /resume <session_id>", isError: true };
-        }
-        const sessions = getSessionHistoryWithSummaries(100);
-        const match = sessions.find((s) => s.session_id.startsWith(targetId));
-        if (!match) {
-          return {
-            message: `Session "${targetId}" not found. Use /history to list sessions.`,
-            isError: true,
-          };
-        }
-
-        setSessionId(match.session_id);
-
-        if (match.summary) {
-          const resumeContext = buildResumeContext(match.summary, difficulty, mode);
-          setHistory(() => [
-            {
-              id: randomUUID(),
-              role: "system" as const,
-              content: resumeContext,
-            },
-          ]);
-          return {
-            message: `Resumed session ${match.session_id.slice(0, 8)} using summary. Previous: ${match.message_count} messages.`,
-          };
-        }
-
-        const messages = getSessionMessages(match.session_id);
-        if (messages.length === 0) {
-          return { message: "Session has no messages.", isError: true };
-        }
-        const chatMessages = messages.map((m) => ({
-          id: m.message_id,
-          role: m.role as "user" | "assistant" | "system",
-          content: m.content,
-        }));
-        setHistory(() => chatMessages);
-        return {
-          message: `Resumed session ${match.session_id.slice(0, 8)} with ${messages.length} messages. (Tip: Use /summary to generate a summary for faster resume next time)`,
-        };
-      }
-      case "/models": {
-        if (!resolvedConfig.apiKey) {
-          return {
-            message: "API key required to list models.",
-            isError: true,
-          };
-        }
-        void openModelPalette();
-        return null;
-      }
-      case "/config": {
-        const key = args[0]?.toLowerCase();
-        const value = args.slice(1).join(" ");
-
-        if (!key) {
-          const summaryModelDisplay =
-            resolvedConfig.summaryModel ?? "(same as main)";
-          return {
-            message: `Current Configuration:\n\n  Provider: ${resolvedConfig.provider}\n  Model: ${resolvedConfig.model}\n  Summary Model: ${summaryModelDisplay}\n  Config Path: ${configState.path}\n\nUse /config <key> <value> to change settings.\nKeys: summary-model`,
-          };
-        }
-
-        if (key === "summary-model") {
-          if (!value) {
-            return {
-              message: `Summary model: ${resolvedConfig.summaryModel ?? "(same as main)"}`,
-            };
-          }
-          const isReset = value === "--reset" || value === "reset";
-          const nextConfig: TutorConfig = {
-            provider: resolvedConfig.provider,
-            model: resolvedConfig.model,
-            ...(configState.config?.apiKey
-              ? { apiKey: configState.config.apiKey }
-              : {}),
-            ...(isReset ? {} : { summaryModel: value }),
-          };
-          writeConfig(nextConfig);
-          setConfigState({
-            config: nextConfig,
-            error: null,
-            path: configState.path,
-          });
-          return {
-            message: isReset
-              ? "Summary model reset to use main model."
-              : `Summary model set to ${value}.`,
-          };
-        }
-
-        return {
-          message: `Unknown config key: ${key}. Available: summary-model`,
-          isError: true,
-        };
-      }
-      case "/summary": {
-        if (!providerInfo.provider) {
-          return { message: "Provider not configured.", isError: true };
-        }
-        if (history.length === 0) {
-          return { message: "No messages to summarize.", isError: true };
-        }
-
-        const existingSession = getSessionWithSummary(sessionId);
-        if (existingSession?.summary && !args.includes("--regenerate")) {
-          return {
-            message: `Session Summary:\n\n${existingSession.summary}\n\n(Use /summary --regenerate to create a new summary)`,
-          };
-        }
-
-        setStatus("thinking");
-        generateSessionSummary(providerInfo.provider, history)
-          .then((summary) => {
-            updateSessionSummary(sessionId, summary);
-            addMessage({
-              role: "assistant",
-              content: `(Tip) Summary generated:\n\n${summary}`,
-            });
-            setStatus("idle");
-          })
-          .catch(() => {
-            addMessage({
-              role: "assistant",
-              content: "(System) Failed to generate summary.",
-            });
-            setStatus("idle");
-          });
-
-        return null;
-      }
-      case "/save":
-      case "/s": {
-        if (args.length === 0) {
-          return {
-            message: "Usage: /save <word1, word2, ...> [collection]\nExample: /save apple, banana, cherry fruits",
-            isError: true,
-          };
-        }
-
-        const lastArg = args[args.length - 1];
-        const hasCollection = args.length > 1 && !lastArg.includes(",");
-        const collection = hasCollection ? lastArg.toLowerCase() : "default";
-        const wordsArg = hasCollection ? args.slice(0, -1).join(" ") : args.join(" ");
-        const words = wordsArg.split(",").map((w) => w.trim()).filter(Boolean);
-
-        if (words.length === 0) {
-          return { message: "No words provided.", isError: true };
-        }
-
-        if (hasCollection && collection !== "default") {
-          createCollection(collection);
-        }
-
-        const saved = saveVocabItems(words, collection);
-        return {
-          message: `Saved ${saved} word${saved !== 1 ? "s" : ""} to "${collection}" collection.`,
-        };
-      }
-      case "/vocab": {
-        const subcommand = args[0]?.toLowerCase();
-
-        if (!subcommand || subcommand === "list") {
-          const collection = args[1];
-          const items = collection ? getVocabByCollection(collection) : getAllVocab(50);
-
-          if (items.length === 0) {
-            return {
-              message: collection
-                ? `No vocabulary in "${collection}" collection.`
-                : "No vocabulary saved yet. Use /save to add words.",
-            };
-          }
-
-          const grouped = new Map<string, string[]>();
-          for (const item of items) {
-            const col = item.collection;
-            if (!grouped.has(col)) grouped.set(col, []);
-            grouped.get(col)!.push(item.word);
-          }
-
-          const lines: string[] = [];
-          for (const [col, words] of grouped) {
-            lines.push(`[${col}] ${words.join(", ")}`);
-          }
-
-          return { message: `Vocabulary (${items.length} words):\n\n${lines.join("\n")}` };
-        }
-
-        if (subcommand === "stats") {
-          const stats = getVocabStats();
-          return {
-            message: `Vocabulary Stats:\n\n  Total words: ${stats.total}\n  Mastered: ${stats.mastered}\n  Learning: ${stats.learning}\n  Collections: ${stats.collections}`,
-          };
-        }
-
-        if (subcommand === "collections") {
-          const collections = getCollections();
-          if (collections.length === 0) {
-            return { message: "No collections yet. Words are saved to 'default' collection." };
-          }
-          const lines = collections.map(
-            (c) => `  ${c.name.padEnd(15)} ${c.word_count ?? 0} words`
-          );
-          return { message: `Collections:\n\n${lines.join("\n")}` };
-        }
-
-        if (subcommand === "practice") {
-          const collection = args[1];
-          const practiceItems = getVocabForPractice(collection, 10);
-
-          if (practiceItems.length === 0) {
-            return {
-              message: collection
-                ? `No vocabulary in "${collection}" to practice.`
-                : "No vocabulary to practice. Use /save to add words first.",
-              isError: true,
-            };
-          }
-
-          setVocabPractice({
-            items: practiceItems.map((item) => ({
-              id: item.id,
-              word: item.word,
-              definition: item.definition,
-            })),
-            currentIndex: 0,
-            showAnswer: false,
-            score: { correct: 0, incorrect: 0 },
-          });
-          setMainView("vocabPractice");
-          return null;
-        }
-
-        return {
-          message: "Usage: /vocab [list|stats|collections|practice] [collection]\nExamples:\n  /vocab - list all words\n  /vocab list fruits - list words in 'fruits' collection\n  /vocab stats - show statistics\n  /vocab collections - list all collections\n  /vocab practice - start practice session",
-          isError: true,
-        };
-      }
-      default:
-        return { message: "Unknown command. Use /help.", isError: true };
-    }
+    return handleCommand(value, ctx, actions);
   };
 
   const sendChatMessage = (content: string) => {
