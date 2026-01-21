@@ -23,6 +23,7 @@ db.exec(`
 db.exec(`
   CREATE TABLE IF NOT EXISTS sessions (
     session_id TEXT PRIMARY KEY,
+    title TEXT,
     summary TEXT,
     difficulty TEXT,
     mode TEXT,
@@ -34,6 +35,12 @@ db.exec(`
 // Add message_id column if it doesn't exist (migration for existing databases)
 try {
   db.exec(`ALTER TABLE messages ADD COLUMN message_id TEXT`);
+} catch {
+  // Column already exists, ignore
+}
+
+try {
+  db.exec(`ALTER TABLE sessions ADD COLUMN title TEXT`);
 } catch {
   // Column already exists, ignore
 }
@@ -51,6 +58,7 @@ export interface SessionSummary {
   message_count: number;
   started_at: string;
   last_message_at: string;
+  title?: string | null;
 }
 
 export const getSessionHistory = (limit = 10): SessionSummary[] => {
@@ -97,6 +105,7 @@ export const sessionExists = (sessionId: string): boolean => {
 
 export interface SessionRecord {
   session_id: string;
+  title: string | null;
   summary: string | null;
   difficulty: string | null;
   mode: string | null;
@@ -105,9 +114,10 @@ export interface SessionRecord {
 }
 
 const upsertSession = db.prepare(`
-  INSERT INTO sessions (session_id, summary, difficulty, mode, created_at, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?)
+  INSERT INTO sessions (session_id, title, summary, difficulty, mode, created_at, updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(session_id) DO UPDATE SET
+    title = COALESCE(excluded.title, sessions.title),
     summary = COALESCE(excluded.summary, sessions.summary),
     difficulty = COALESCE(excluded.difficulty, sessions.difficulty),
     mode = COALESCE(excluded.mode, sessions.mode),
@@ -116,11 +126,12 @@ const upsertSession = db.prepare(`
 
 export const saveSession = (
   sessionId: string,
-  options: { summary?: string; difficulty?: string; mode?: string } = {}
+  options: { title?: string; summary?: string; difficulty?: string; mode?: string } = {}
 ): void => {
   const now = new Date().toISOString();
   upsertSession.run(
     sessionId,
+    options.title ?? null,
     options.summary ?? null,
     options.difficulty ?? null,
     options.mode ?? null,
@@ -140,9 +151,20 @@ export const updateSessionSummary = (sessionId: string, summary: string): void =
   }
 };
 
+export const updateSessionTitle = (sessionId: string, title: string): void => {
+  const stmt = db.prepare(`
+    UPDATE sessions SET title = ?, updated_at = ? WHERE session_id = ?
+  `);
+  const now = new Date().toISOString();
+  const result = stmt.run(title, now, sessionId);
+  if (result.changes === 0) {
+    saveSession(sessionId, { title });
+  }
+};
+
 export const getSession = (sessionId: string): SessionRecord | null => {
   const stmt = db.prepare(`
-    SELECT session_id, summary, difficulty, mode, created_at, updated_at
+    SELECT session_id, title, summary, difficulty, mode, created_at, updated_at
     FROM sessions WHERE session_id = ?
   `);
   return (stmt.get(sessionId) as SessionRecord) ?? null;
@@ -155,6 +177,7 @@ export const getSessionWithSummary = (sessionId: string): SessionSummary & { sum
       COUNT(*) as message_count,
       MIN(m.created_at) as started_at,
       MAX(m.created_at) as last_message_at,
+      s.title,
       s.summary
     FROM messages m
     LEFT JOIN sessions s ON m.session_id = s.session_id
@@ -171,6 +194,7 @@ export const getSessionHistoryWithSummaries = (limit = 10): (SessionSummary & { 
       COUNT(*) as message_count,
       MIN(m.created_at) as started_at,
       MAX(m.created_at) as last_message_at,
+      s.title,
       s.summary
     FROM messages m
     LEFT JOIN sessions s ON m.session_id = s.session_id

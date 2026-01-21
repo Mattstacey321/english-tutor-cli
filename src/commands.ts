@@ -9,6 +9,7 @@ import {
   getSessionHistoryWithSummaries,
   getSessionWithSummary,
   updateSessionSummary,
+  updateSessionTitle,
   saveVocabItems,
   getVocabByCollection,
   getAllVocab,
@@ -23,8 +24,16 @@ import {
   isValidExportFormat,
   type ExportFormat,
 } from "./export.js";
-import { generateSessionSummary, buildResumeContext } from "./summary.js";
-import type { ConfigState, VocabPracticeState, MainView } from "./stores/tutor-store.js";
+import {
+  generateSessionSummary,
+  buildResumeContext,
+  generateSessionTitle,
+} from "./summary.js";
+import type {
+  ConfigState,
+  VocabPracticeState,
+  MainView,
+} from "./stores/tutor-store.js";
 
 export type CommandResult = { message: string; isError?: boolean } | null;
 
@@ -35,6 +44,23 @@ export const availableModes: PracticeMode[] = [
   "role-play",
   "fluency",
   "exam",
+];
+
+const availableCommands = [
+  "/clear",
+  "/config",
+  "/difficulty",
+  "/mode",
+  "/export",
+  "/history",
+  "/resume",
+  "/rename",
+  "/summary",
+  "/save",
+  "/vocab",
+  "/stats",
+  "/models",
+  "/help",
 ];
 
 const formatModeHelp = () => `Modes: ${availableModes.join(", ")}`;
@@ -66,15 +92,14 @@ export interface CommandActions {
 export const handleCommand = (
   value: string,
   ctx: CommandContext,
-  actions: CommandActions
+  actions: CommandActions,
 ): CommandResult => {
   const [command, ...args] = value.trim().split(/\s+/);
 
   switch (command) {
     case "/help":
       return {
-        message:
-          "Commands: /clear, /config, /difficulty, /mode, /export, /history, /resume, /summary, /save, /vocab, /stats, /models, /help\nTip: To send a message starting with /, type //",
+        message: `Commands: ${Object.keys(availableCommands).join(", ")}\nTip: To send a message starting with /, type //`,
       };
 
     case "/clear": {
@@ -89,7 +114,11 @@ export const handleCommand = (
 
     case "/difficulty":
     case "/diff": {
-      const validLevels: Difficulty[] = ["beginner", "intermediate", "advanced"];
+      const validLevels: Difficulty[] = [
+        "beginner",
+        "intermediate",
+        "advanced",
+      ];
       const requested = (args[0] ?? "").toLowerCase();
       if (!requested) {
         return {
@@ -133,7 +162,7 @@ export const handleCommand = (
         const result = exportConversation(
           ctx.history,
           ctx.sessionId,
-          formatArg as ExportFormat
+          formatArg as ExportFormat,
         );
         return { message: `Exported to ${result.filename}` };
       } catch (error) {
@@ -143,28 +172,15 @@ export const handleCommand = (
     }
 
     case "/history": {
-      const limit = parseInt(args[0] ?? "10", 10) || 10;
-      const sessions = getSessionHistoryWithSummaries(limit);
-      if (sessions.length === 0) {
-        return { message: "No previous sessions found." };
-      }
-      const lines = sessions.map((s) => {
-        const shortId = s.session_id.slice(0, 8);
-        const date = s.started_at.split("T")[0];
-        const summaryPreview = s.summary
-          ? s.summary.slice(0, 50) + (s.summary.length > 50 ? "..." : "")
-          : "(no summary)";
-        return `  ${shortId}  ${date}  ${String(s.message_count).padStart(3)} msgs\n    ${summaryPreview}`;
-      });
-      return {
-        message: `Recent Sessions:\n\n${lines.join("\n\n")}\n\nUse /resume <id> to continue a session.`,
-      };
+      actions.setMainView("sessionPicker");
+      return null;
     }
 
     case "/resume": {
       const targetId = args[0];
       if (!targetId) {
-        return { message: "Usage: /resume <session_id>", isError: true };
+        actions.setMainView("sessionPicker");
+        return null;
       }
       const sessions = getSessionHistoryWithSummaries(100);
       const match = sessions.find((s) => s.session_id.startsWith(targetId));
@@ -181,7 +197,7 @@ export const handleCommand = (
         const resumeContext = buildResumeContext(
           match.summary,
           ctx.difficulty,
-          ctx.mode
+          ctx.mode,
         );
         actions.setHistory(() => [
           {
@@ -267,6 +283,36 @@ export const handleCommand = (
       };
     }
 
+    case "/rename": {
+      const targetId = args[0];
+      const newTitle = args.slice(1).join(" ").trim();
+      if (!targetId || !newTitle) {
+        return {
+          message: "Usage: /rename <session_id> <new title>",
+          isError: true,
+        };
+      }
+      const sessions = getSessionHistoryWithSummaries(100);
+      const matches = sessions.filter((s) => s.session_id.startsWith(targetId));
+      if (matches.length === 0) {
+        return {
+          message: `Session "${targetId}" not found. Use /history to list sessions.`,
+          isError: true,
+        };
+      }
+      if (matches.length > 1) {
+        return {
+          message: `Session id prefix "${targetId}" is ambiguous. Please type more characters.`,
+          isError: true,
+        };
+      }
+      const match = matches[0];
+      updateSessionTitle(match.session_id, newTitle);
+      return {
+        message: `Session ${match.session_id.slice(0, 8)} renamed to "${newTitle}".`,
+      };
+    }
+
     case "/summary": {
       if (!ctx.provider) {
         return { message: "Provider not configured.", isError: true };
@@ -282,13 +328,27 @@ export const handleCommand = (
         };
       }
 
+      const provider = ctx.provider;
       actions.setStatus("thinking");
-      generateSessionSummary(ctx.provider, ctx.history)
-        .then((summary) => {
+      generateSessionSummary(provider, ctx.history)
+        .then(async (summary) => {
           updateSessionSummary(ctx.sessionId, summary);
+
+          const existingTitle = existingSession?.title;
+          let titleMessage = "";
+          if (!existingTitle) {
+            try {
+              const title = await generateSessionTitle(provider, ctx.history);
+              updateSessionTitle(ctx.sessionId, title);
+              titleMessage = `\nTitle: "${title}"`;
+            } catch {
+              titleMessage = "";
+            }
+          }
+
           actions.addMessage({
             role: "assistant",
-            content: `(Tip) Summary generated:\n\n${summary}`,
+            content: `(Tip) Summary generated:${titleMessage}\n\n${summary}`,
           });
           actions.setStatus("idle");
         })
@@ -383,11 +443,12 @@ export const handleCommand = (
         const collections = getCollections();
         if (collections.length === 0) {
           return {
-            message: "No collections yet. Words are saved to 'default' collection.",
+            message:
+              "No collections yet. Words are saved to 'default' collection.",
           };
         }
         const lines = collections.map(
-          (c) => `  ${c.name.padEnd(15)} ${c.word_count ?? 0} words`
+          (c) => `  ${c.name.padEnd(15)} ${c.word_count ?? 0} words`,
         );
         return { message: `Collections:\n\n${lines.join("\n")}` };
       }
@@ -428,7 +489,7 @@ export const handleCommand = (
 
     case "/stats": {
       const stats = getLearningStats();
-      
+
       const sessionLines = [
         `  Total: ${stats.sessions.total}`,
         `  This week: ${stats.sessions.thisWeek}`,

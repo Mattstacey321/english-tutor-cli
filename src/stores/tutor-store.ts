@@ -5,11 +5,12 @@
  import type { PracticeMode } from "../conversation.js";
  import type { TutorConfig } from "../config.js";
  import type { ChatMessage } from "../providers/types.js";
+import type { SessionItem } from "../components/session-picker.js";
  
   export type Status = "idle" | "thinking" | "error";
   export type PaletteView = "commands" | "models";
   export type PaletteSource = "slash" | "ctrlk" | null;
-  export type MainView = "chat" | "help" | "modePicker" | "modelsPicker" | "vocabPractice";
+  export type MainView = "chat" | "help" | "modePicker" | "modelsPicker" | "vocabPractice" | "sessionPicker";
   
   export interface VocabPracticeState {
     items: { id: number; word: string; definition: string | null }[];
@@ -61,6 +62,9 @@
 
     // Vocab practice
     vocabPractice: VocabPracticeState | null;
+
+    // Session picker
+    sessionPickerSessions: SessionItem[];
   
      // Actions - Session
      setSessionId: (sessionId: string) => void;
@@ -105,6 +109,9 @@
     vocabPracticeNext: () => void;
     vocabPracticeAnswer: (correct: boolean) => void;
     vocabPracticeToggleAnswer: () => void;
+
+    // Actions - Session picker
+    setSessionPickerSessions: (sessions: SessionItem[]) => void;
   
     // Initialization
     initialize: (configState: ConfigState, setupMode: boolean) => void;
@@ -147,6 +154,9 @@
 
     // Initial state - Vocab practice
     vocabPractice: null,
+
+    // Initial state - Session picker
+    sessionPickerSessions: [],
   
   // Actions - Session
    setSessionId: (sessionId) => set({ sessionId }),
@@ -234,7 +244,7 @@
           },
         };
       }),
-    vocabPracticeToggleAnswer: () =>
+        vocabPracticeToggleAnswer: () =>
       set((state) => {
         if (!state.vocabPractice) return {};
         return {
@@ -244,6 +254,9 @@
           },
         };
       }),
+
+    // Actions - Session picker
+    setSessionPickerSessions: (sessionPickerSessions) => set({ sessionPickerSessions }),
   
     // Initialization
     initialize: (configState, setupMode) => set({ configState, setupMode }),

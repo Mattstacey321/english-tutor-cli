@@ -56,3 +56,46 @@ Practice mode: ${mode}
 
 Continue the tutoring session naturally, acknowledging you're picking up where you left off.`;
 };
+
+const TITLE_PROMPT = `Generate a very short title (3-6 words) for this English tutoring session based on the main topic or activity. Examples: "Past Tense Practice", "Restaurant Role-Play", "Vocabulary: Travel Words". Return ONLY the title, no quotes or explanation.`;
+
+export const generateSessionTitle = async (
+  provider: TutorProvider,
+  messages: ChatMessage[]
+): Promise<string> => {
+  const fallbackTitle = `Session ${new Date().toISOString().split("T")[0]}`;
+  
+  const userAssistantMessages = messages.filter(
+    (m) => m.role === "user" || m.role === "assistant"
+  );
+
+  if (userAssistantMessages.length < 2) {
+    return fallbackTitle;
+  }
+
+  const sampleMessages = userAssistantMessages.slice(0, 6);
+  const conversationText = sampleMessages
+    .map((m) => `${m.role === "user" ? "Learner" : "Tutor"}: ${m.content}`)
+    .join("\n\n");
+
+  const truncated =
+    conversationText.length > 1500
+      ? conversationText.slice(0, 1500) + "..."
+      : conversationText;
+
+  const titleRequest: ChatMessage[] = [
+    { role: "system", content: TITLE_PROMPT },
+    {
+      role: "user",
+      content: `Generate a title for this session:\n\n${truncated}`,
+    },
+  ];
+
+  try {
+    const title = await provider.sendMessage(titleRequest);
+    const cleaned = title.trim().replace(/^["']|["']$/g, "");
+    return cleaned.length > 0 && cleaned.length <= 50 ? cleaned : fallbackTitle;
+  } catch {
+    return fallbackTitle;
+  }
+};

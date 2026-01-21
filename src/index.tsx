@@ -14,7 +14,12 @@ import { buildTutorPrompt } from "./conversation.js";
 import { createGeminiProvider, listGeminiModels } from "./providers/gemini.js";
 import { createOpenAIProvider, listOpenAIModels } from "./providers/openai.js";
 import type { TutorProvider, ChatMessage } from "./providers/types.js";
-import { saveMessage, updateVocabMastery } from "./storage.js";
+import {
+  saveMessage,
+  updateVocabMastery,
+  getSessionHistoryWithSummaries,
+  getSessionMessages,
+} from "./storage.js";
 import { useTutorStore } from "./stores/tutor-store.js";
 import type { PracticeMode } from "./conversation.js";
 import { CommandPalette } from "./components/command-palette.js";
@@ -29,6 +34,7 @@ import {
   ScrollableMessageList,
   type ScrollableMessageListRef,
 } from "./components/scrollable-message-list.js";
+import { SessionPicker } from "./components/session-picker.js";
 import Spinner from "ink-spinner";
 import { SetupWizard } from "./layouts/setup-wizard.js";
 import { ErrorBoundary } from "./components/error-boundary.js";
@@ -146,7 +152,15 @@ const App = () => {
   const setVocabPractice = useTutorStore((s) => s.setVocabPractice);
   const vocabPracticeNext = useTutorStore((s) => s.vocabPracticeNext);
   const vocabPracticeAnswer = useTutorStore((s) => s.vocabPracticeAnswer);
-  const vocabPracticeToggleAnswer = useTutorStore((s) => s.vocabPracticeToggleAnswer);
+  const vocabPracticeToggleAnswer = useTutorStore(
+    (s) => s.vocabPracticeToggleAnswer,
+  );
+
+  // Session picker state & actions
+  const sessionPickerSessions = useTutorStore((s) => s.sessionPickerSessions);
+  const setSessionPickerSessions = useTutorStore(
+    (s) => s.setSessionPickerSessions,
+  );
 
   // Ref to store the current stream controller for aborting
   const streamControllerRef = useRef<{ abort: () => void } | null>(null);
@@ -183,6 +197,12 @@ const App = () => {
         left: "/clear",
         right: "Clear conversation",
         command: "/clear",
+      },
+      {
+        id: "rename",
+        left: "/rename",
+        right: "Rename session",
+        command: "/rename",
       },
       {
         id: "export",
@@ -367,6 +387,10 @@ const App = () => {
       case "/mode":
         setMainView("modePicker");
         return;
+      case "/history":
+        setSessionPickerSessions(getSessionHistoryWithSummaries(20));
+        setMainView("sessionPicker");
+        return;
       case "/models":
         setMainView("modelsPicker");
         void openModelPalette();
@@ -379,6 +403,7 @@ const App = () => {
             content: `${result.isError ? "(System)" : "(Tip)"} ${result.message}`,
           });
         }
+        return;
       }
     }
   };
@@ -432,9 +457,12 @@ const App = () => {
 
   // Open/close palette based on slash input
   useEffect(() => {
+    const isSlashCommand = input.startsWith("/") && !input.startsWith("//");
+    const hasArgs = isSlashCommand && input.includes(" ");
+
     const shouldOpen =
-      input.startsWith("/") &&
-      !input.startsWith("//") &&
+      isSlashCommand &&
+      !hasArgs &&
       status !== "thinking" &&
       !providerInfo.error;
 
@@ -442,8 +470,8 @@ const App = () => {
       if (!paletteOpen) {
         openPalette("commands", "slash");
       }
-    } else if (!input.startsWith("/") || input.startsWith("//")) {
-      if (slashDismissed) {
+    } else if (!isSlashCommand || hasArgs) {
+      if (slashDismissed && !isSlashCommand) {
         setSlashDismissed(false);
       }
       if (paletteOpen && paletteSource === "slash") {
@@ -462,12 +490,17 @@ const App = () => {
     setSlashDismissed,
   ]);
 
-  // Reset palette index when items change
+  // Reset palette index when items change, auto-highlight single match
   useEffect(() => {
-    if (paletteOpen && paletteIndex >= filteredPaletteItems.length) {
+    if (!paletteOpen) return;
+
+    const validItems = filteredPaletteItems.filter((item) => !item.disabled);
+    if (validItems.length === 1) {
+      setPaletteIndex(0);
+    } else if (paletteIndex >= filteredPaletteItems.length) {
       setPaletteIndex(0);
     }
-  }, [paletteOpen, paletteIndex, filteredPaletteItems.length, setPaletteIndex]);
+  }, [paletteOpen, paletteIndex, filteredPaletteItems, setPaletteIndex]);
 
   useInput((inputChar, key) => {
     if (inputChar === "\u0003") {
@@ -569,6 +602,54 @@ const App = () => {
       return;
     }
 
+    if (mainView === "sessionPicker") {
+      if (key.escape || inputChar.toLowerCase() === "b") {
+        setMainView("chat");
+        return;
+      }
+
+      if (key.upArrow || key.downArrow) {
+        const count = sessionPickerSessions.length || 1;
+        const delta = key.upArrow ? -1 : 1;
+        const next = (panelIndex + delta + count) % count;
+        setPanelIndex(next);
+        return;
+      }
+
+      if (key.return) {
+        const selected = sessionPickerSessions[panelIndex];
+        if (selected) {
+          setSessionId(selected.session_id);
+          const messages = getSessionMessages(selected.session_id);
+          if (messages.length > 0) {
+            const chatMessages = messages.map((m) => ({
+              id: m.message_id,
+              role: m.role as "user" | "assistant" | "system",
+              content: m.content,
+            }));
+            setHistory(() => chatMessages);
+          }
+          setMainView("chat");
+          addMessage({
+            role: "system",
+            content: `(Tip) Resumed session ${selected.session_id.slice(0, 8)} with ${messages.length} messages.`,
+          });
+        }
+        return;
+      }
+
+      if (inputChar.toLowerCase() === "r") {
+        const selected = sessionPickerSessions[panelIndex];
+        if (selected) {
+          setInput(`/rename ${selected.session_id} `);
+          setMainView("chat");
+        }
+        return;
+      }
+
+      return;
+    }
+
     if (mainView !== "chat") {
       if (key.escape) {
         setMainView("chat");
@@ -631,6 +712,14 @@ const App = () => {
       void openModelPalette();
     }
   }, [mainView, resolvedConfig.apiKey]);
+
+  useEffect(() => {
+    if (mainView === "sessionPicker") {
+      const sessions = getSessionHistoryWithSummaries(20);
+      setSessionPickerSessions(sessions);
+      setPanelIndex(0);
+    }
+  }, [mainView, setSessionPickerSessions, setPanelIndex]);
 
   useEffect(() => {
     if (mainView !== "chat" && paletteOpen) {
@@ -768,6 +857,10 @@ const App = () => {
   };
 
   const messageListHeight = Math.max(5, terminalSize.height - 15);
+  const fullscreenHeight = Math.max(5, terminalSize.height - 4);
+
+  const isFullscreenView = mainView !== "chat";
+  const viewHeight = isFullscreenView ? fullscreenHeight : messageListHeight;
 
   if (showSetup) {
     return (
@@ -784,23 +877,24 @@ const App = () => {
 
   return (
     <Box flexDirection="column" padding={1}>
-      {/* Header */}
-      <Box
-        flexDirection="row"
-        justifyContent="space-between"
-        marginBottom={1}
-        padding={1}
-        borderStyle="round"
-        borderColor="cyan"
-      >
-        <Text bold color="cyan">
-          🎓 English Tutor CLI
-        </Text>
-        <Text color="gray">
-          {mode.toUpperCase()} | {difficulty.toUpperCase()} |{" "}
-          {providerInfo.name.toUpperCase()}
-        </Text>
-      </Box>
+      {!isFullscreenView && (
+        <Box
+          flexDirection="row"
+          justifyContent="space-between"
+          marginBottom={1}
+          padding={1}
+          borderStyle="round"
+          borderColor="cyan"
+        >
+          <Text bold color="cyan">
+            🎓 English Tutor CLI
+          </Text>
+          <Text color="gray">
+            {mode.toUpperCase()} | {difficulty.toUpperCase()} |{" "}
+            {providerInfo.name.toUpperCase()}
+          </Text>
+        </Box>
+      )}
 
       {mainView === "chat" && (
         <ScrollableMessageList
@@ -824,6 +918,14 @@ const App = () => {
         <CommandPalette items={modelPaletteItems} selectedIndex={panelIndex} />
       )}
 
+      {mainView === "sessionPicker" && (
+        <SessionPicker
+          sessions={sessionPickerSessions}
+          selectedIndex={panelIndex}
+          height={viewHeight}
+        />
+      )}
+
       {mainView === "vocabPractice" && vocabPractice && (
         <Box
           flexDirection="column"
@@ -838,12 +940,18 @@ const App = () => {
             </Text>
             <Text color="gray">
               {" "}
-              ({vocabPractice.currentIndex + 1}/{vocabPractice.items.length}) | Score:{" "}
-              {vocabPractice.score.correct}/{vocabPractice.score.correct + vocabPractice.score.incorrect}
+              ({vocabPractice.currentIndex + 1}/{vocabPractice.items.length}) |
+              Score: {vocabPractice.score.correct}/
+              {vocabPractice.score.correct + vocabPractice.score.incorrect}
             </Text>
           </Box>
 
-          <Box flexDirection="column" flexGrow={1} justifyContent="center" alignItems="center">
+          <Box
+            flexDirection="column"
+            flexGrow={1}
+            justifyContent="center"
+            alignItems="center"
+          >
             <Text bold color="cyan">
               {vocabPractice.items[vocabPractice.currentIndex]?.word}
             </Text>
@@ -851,7 +959,8 @@ const App = () => {
             {vocabPractice.showAnswer && (
               <Box marginTop={1}>
                 <Text color="gray">
-                  {vocabPractice.items[vocabPractice.currentIndex]?.definition || "(no definition)"}
+                  {vocabPractice.items[vocabPractice.currentIndex]
+                    ?.definition || "(no definition)"}
                 </Text>
               </Box>
             )}
@@ -861,80 +970,85 @@ const App = () => {
             {!vocabPractice.showAnswer ? (
               <Text color="gray">Press Space to reveal | Esc to exit</Text>
             ) : (
-              <Text color="gray">Press Y (correct) or N (incorrect) | Esc to exit</Text>
+              <Text color="gray">
+                Press Y (correct) or N (incorrect) | Esc to exit
+              </Text>
             )}
           </Box>
         </Box>
       )}
 
-      {/* Status Bar */}
-      <Box
-        flexDirection="row"
-        justifyContent="space-between"
-        marginTop={1}
-        paddingX={1}
-      >
-        <Box flexDirection="row">
-          {isStreaming && (
-            <Text color="cyan">
-              <Spinner type="dots" /> Streaming... (Ctrl+C to stop)
-            </Text>
-          )}
-          {!isStreaming && status === "thinking" && (
-            <Text color="green">
-              <Spinner type="dots" /> Thinking...
-            </Text>
-          )}
-          {providerInfo.error && (
-            <Text color="red">⚠️ {providerInfo.error}</Text>
-          )}
+      {!isFullscreenView && (
+        <Box
+          flexDirection="row"
+          justifyContent="space-between"
+          marginTop={1}
+          paddingX={1}
+        >
+          <Box flexDirection="row">
+            {isStreaming && (
+              <Text color="cyan">
+                <Spinner type="dots" /> Streaming... (Ctrl+C to stop)
+              </Text>
+            )}
+            {!isStreaming && status === "thinking" && (
+              <Text color="green">
+                <Spinner type="dots" /> Thinking...
+              </Text>
+            )}
+            {providerInfo.error && (
+              <Text color="red">⚠️ {providerInfo.error}</Text>
+            )}
+          </Box>
+          <Text color="gray">
+            {history.length} messages | Mode: {mode}
+          </Text>
         </Box>
-        <Text color="gray">
-          {history.length} messages | Mode: {mode}
-        </Text>
-      </Box>
+      )}
 
-      {/* Input */}
-      <Box
-        borderStyle="single"
-        borderColor={status === "thinking" ? "yellow" : "green"}
-        padding={0.5}
-        marginTop={1}
-      >
-        <TextInput
-          value={input}
-          onChange={setInput}
-          onSubmit={handleSubmit}
-          placeholder="Type your message... (Ctrl+K for commands)"
-          showCursor={true}
-          focus={
-            !providerInfo.error &&
-            status !== "thinking" &&
-            (!paletteOpen || paletteSource === "slash")
-          }
-        />
-      </Box>
+      {!isFullscreenView && (
+        <Box
+          borderStyle="single"
+          borderColor={status === "thinking" ? "yellow" : "green"}
+          padding={0.5}
+          marginTop={1}
+        >
+          <TextInput
+            value={input}
+            onChange={setInput}
+            onSubmit={handleSubmit}
+            placeholder="Type your message... (Ctrl+K for commands)"
+            showCursor={true}
+            focus={
+              !providerInfo.error &&
+              status !== "thinking" &&
+              (!paletteOpen || paletteSource === "slash")
+            }
+          />
+        </Box>
+      )}
 
-      {paletteOpen && (
+      {paletteOpen && !isFullscreenView && (
         <CommandPalette
           items={filteredPaletteItems}
           selectedIndex={paletteIndex}
         />
       )}
 
-      {/* Footer */}
-      <Box
-        borderColor="gray"
-        borderStyle="single"
-        flexWrap="nowrap"
-        marginTop={1}
-        paddingX={1}
-      >
-        <Text color="gray">
-          <Text bold>Ctrl+K</Text> Commands | <Text bold>Ctrl+C</Text> Exit |{" "}
-          <Text bold>↑↓</Text> Scroll
-        </Text>
-      </Box>
+      {!isFullscreenView && (
+        <Box
+          borderColor="gray"
+          borderStyle="single"
+          flexWrap="nowrap"
+          marginTop={1}
+          paddingX={1}
+        >
+          <Text color="gray">
+            <Text bold>Ctrl+K</Text> Commands | <Text bold>Ctrl+C</Text> Exit |{" "}
+            <Text bold>↑↓</Text> Scroll
+          </Text>
+        </Box>
+      )}
     </Box>
   );
 };
