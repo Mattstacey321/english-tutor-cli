@@ -364,3 +364,165 @@ export const getVocabStats = (): { total: number; mastered: number; learning: nu
   
   return { total, mastered, learning: total - mastered, collections };
 };
+
+export interface LearningStats {
+  sessions: {
+    total: number;
+    thisWeek: number;
+    thisMonth: number;
+  };
+  messages: {
+    total: number;
+    userMessages: number;
+    assistantMessages: number;
+    avgPerSession: number;
+  };
+  vocabulary: {
+    total: number;
+    mastered: number;
+    learning: number;
+    reviewedToday: number;
+    totalReviews: number;
+  };
+  streaks: {
+    currentStreak: number;
+    longestStreak: number;
+    lastActiveDate: string | null;
+  };
+  practice: {
+    mostUsedMode: string | null;
+    modeBreakdown: Record<string, number>;
+  };
+}
+
+export const getLearningStats = (): LearningStats => {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  const totalSessionsStmt = db.prepare(`SELECT COUNT(DISTINCT session_id) as count FROM messages`);
+  const totalSessions = (totalSessionsStmt.get() as { count: number }).count;
+
+  const weekSessionsStmt = db.prepare(`
+    SELECT COUNT(DISTINCT session_id) as count FROM messages WHERE created_at >= ?
+  `);
+  const weekSessions = (weekSessionsStmt.get(weekAgo) as { count: number }).count;
+
+  const monthSessionsStmt = db.prepare(`
+    SELECT COUNT(DISTINCT session_id) as count FROM messages WHERE created_at >= ?
+  `);
+  const monthSessions = (monthSessionsStmt.get(monthAgo) as { count: number }).count;
+
+  const totalMessagesStmt = db.prepare(`SELECT COUNT(*) as count FROM messages`);
+  const totalMessages = (totalMessagesStmt.get() as { count: number }).count;
+
+  const userMessagesStmt = db.prepare(`SELECT COUNT(*) as count FROM messages WHERE role = 'user'`);
+  const userMessages = (userMessagesStmt.get() as { count: number }).count;
+
+  const assistantMessagesStmt = db.prepare(`SELECT COUNT(*) as count FROM messages WHERE role = 'assistant'`);
+  const assistantMessages = (assistantMessagesStmt.get() as { count: number }).count;
+
+  const avgPerSession = totalSessions > 0 ? Math.round(totalMessages / totalSessions) : 0;
+
+  const vocabTotalStmt = db.prepare(`SELECT COUNT(*) as count FROM vocabulary`);
+  const vocabTotal = (vocabTotalStmt.get() as { count: number }).count;
+
+  const vocabMasteredStmt = db.prepare(`SELECT COUNT(*) as count FROM vocabulary WHERE mastery_level >= 3`);
+  const vocabMastered = (vocabMasteredStmt.get() as { count: number }).count;
+
+  const reviewedTodayStmt = db.prepare(`
+    SELECT COUNT(*) as count FROM vocabulary WHERE last_reviewed_at >= ?
+  `);
+  const reviewedToday = (reviewedTodayStmt.get(todayStart) as { count: number }).count;
+
+  const totalReviewsStmt = db.prepare(`SELECT SUM(times_reviewed) as total FROM vocabulary`);
+  const totalReviews = (totalReviewsStmt.get() as { total: number | null }).total ?? 0;
+
+  const activeDaysStmt = db.prepare(`
+    SELECT DISTINCT DATE(created_at) as day FROM messages ORDER BY day DESC LIMIT 365
+  `);
+  const activeDays = (activeDaysStmt.all() as { day: string }[]).map(r => r.day);
+  
+  let currentStreak = 0;
+  let longestStreak = 0;
+  let tempStreak = 0;
+  const today = now.toISOString().split('T')[0];
+  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+  if (activeDays.length > 0) {
+    const isActiveRecently = activeDays[0] === today || activeDays[0] === yesterday;
+    
+    for (let i = 0; i < activeDays.length; i++) {
+      if (i === 0) {
+        tempStreak = 1;
+      } else {
+        const prevDay = new Date(activeDays[i - 1]);
+        const currDay = new Date(activeDays[i]);
+        const diffDays = Math.round((prevDay.getTime() - currDay.getTime()) / (24 * 60 * 60 * 1000));
+        
+        if (diffDays === 1) {
+          tempStreak++;
+        } else {
+          if (isActiveRecently && currentStreak === 0) {
+            currentStreak = tempStreak;
+          }
+          longestStreak = Math.max(longestStreak, tempStreak);
+          tempStreak = 1;
+        }
+      }
+    }
+    
+    longestStreak = Math.max(longestStreak, tempStreak);
+    if (isActiveRecently && currentStreak === 0) {
+      currentStreak = tempStreak;
+    }
+  }
+
+  const lastActiveDate = activeDays.length > 0 ? activeDays[0] : null;
+
+  const modeStmt = db.prepare(`
+    SELECT mode, COUNT(*) as count FROM sessions WHERE mode IS NOT NULL GROUP BY mode ORDER BY count DESC
+  `);
+  const modeResults = modeStmt.all() as { mode: string; count: number }[];
+  
+  const modeBreakdown: Record<string, number> = {};
+  let mostUsedMode: string | null = null;
+  
+  for (const row of modeResults) {
+    modeBreakdown[row.mode] = row.count;
+    if (!mostUsedMode) {
+      mostUsedMode = row.mode;
+    }
+  }
+
+  return {
+    sessions: {
+      total: totalSessions,
+      thisWeek: weekSessions,
+      thisMonth: monthSessions,
+    },
+    messages: {
+      total: totalMessages,
+      userMessages,
+      assistantMessages,
+      avgPerSession,
+    },
+    vocabulary: {
+      total: vocabTotal,
+      mastered: vocabMastered,
+      learning: vocabTotal - vocabMastered,
+      reviewedToday,
+      totalReviews,
+    },
+    streaks: {
+      currentStreak,
+      longestStreak,
+      lastActiveDate,
+    },
+    practice: {
+      mostUsedMode,
+      modeBreakdown,
+    },
+  };
+};

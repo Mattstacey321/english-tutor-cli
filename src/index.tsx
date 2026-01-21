@@ -221,6 +221,12 @@ const App = () => {
         command: "/vocab",
       },
       {
+        id: "stats",
+        left: "/stats",
+        right: "View learning statistics",
+        command: "/stats",
+      },
+      {
         id: "models",
         left: "/models",
         right: `List ${providerInfo.name} models`,

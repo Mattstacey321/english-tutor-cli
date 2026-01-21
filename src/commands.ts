@@ -16,6 +16,7 @@ import {
   getCollections,
   createCollection,
   getVocabForPractice,
+  getLearningStats,
 } from "./storage.js";
 import {
   exportConversation,
@@ -73,7 +74,7 @@ export const handleCommand = (
     case "/help":
       return {
         message:
-          "Commands: /clear, /config, /difficulty, /mode, /export, /history, /resume, /summary, /save, /vocab, /models, /help\nTip: To send a message starting with /, type //",
+          "Commands: /clear, /config, /difficulty, /mode, /export, /history, /resume, /summary, /save, /vocab, /stats, /models, /help\nTip: To send a message starting with /, type //",
       };
 
     case "/clear": {
@@ -423,6 +424,70 @@ export const handleCommand = (
           "Usage: /vocab [list|stats|collections|practice] [collection]\nExamples:\n  /vocab - list all words\n  /vocab list fruits - list words in 'fruits' collection\n  /vocab stats - show statistics\n  /vocab collections - list all collections\n  /vocab practice - start practice session",
         isError: true,
       };
+    }
+
+    case "/stats": {
+      const stats = getLearningStats();
+      
+      const sessionLines = [
+        `  Total: ${stats.sessions.total}`,
+        `  This week: ${stats.sessions.thisWeek}`,
+        `  This month: ${stats.sessions.thisMonth}`,
+      ];
+
+      const messageLines = [
+        `  Total: ${stats.messages.total}`,
+        `  You sent: ${stats.messages.userMessages}`,
+        `  Tutor replies: ${stats.messages.assistantMessages}`,
+        `  Avg per session: ${stats.messages.avgPerSession}`,
+      ];
+
+      const vocabLines = [
+        `  Total words: ${stats.vocabulary.total}`,
+        `  Mastered: ${stats.vocabulary.mastered}`,
+        `  Learning: ${stats.vocabulary.learning}`,
+        `  Reviewed today: ${stats.vocabulary.reviewedToday}`,
+        `  Total reviews: ${stats.vocabulary.totalReviews}`,
+      ];
+
+      const streakLines = [
+        `  Current streak: ${stats.streaks.currentStreak} day${stats.streaks.currentStreak !== 1 ? "s" : ""}`,
+        `  Longest streak: ${stats.streaks.longestStreak} day${stats.streaks.longestStreak !== 1 ? "s" : ""}`,
+        `  Last active: ${stats.streaks.lastActiveDate ?? "Never"}`,
+      ];
+
+      const modeLines: string[] = [];
+      if (stats.practice.mostUsedMode) {
+        modeLines.push(`  Favorite mode: ${stats.practice.mostUsedMode}`);
+        const breakdown = Object.entries(stats.practice.modeBreakdown)
+          .map(([mode, count]) => `${mode}: ${count}`)
+          .join(", ");
+        if (breakdown) {
+          modeLines.push(`  Breakdown: ${breakdown}`);
+        }
+      } else {
+        modeLines.push("  No practice mode data yet");
+      }
+
+      const output = [
+        "📊 Learning Statistics\n",
+        "Sessions:",
+        ...sessionLines,
+        "",
+        "Messages:",
+        ...messageLines,
+        "",
+        "Vocabulary:",
+        ...vocabLines,
+        "",
+        "Streaks:",
+        ...streakLines,
+        "",
+        "Practice Modes:",
+        ...modeLines,
+      ].join("\n");
+
+      return { message: output };
     }
 
     default:
