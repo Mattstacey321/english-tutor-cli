@@ -93,11 +93,6 @@ export const ScrollableMessageList = forwardRef<
     };
   }, [stdout, updateScrollState]);
 
-  useEffect(() => {
-    const interval = setInterval(updateScrollState, 100);
-    return () => clearInterval(interval);
-  }, [updateScrollState]);
-
   // Auto-scroll when streaming content updates
   useEffect(() => {
     if (isStreaming && streamingContent) {

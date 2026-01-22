@@ -88,6 +88,7 @@ const App = () => {
   const { exit } = useApp();
   const terminalSize = useTerminalSize();
   const scrollRef = useRef<ScrollableMessageListRef>(null);
+  const lastScrollTimeRef = useRef<number>(0);
 
   // Session state & actions (selective subscriptions for better performance)
   const sessionId = useTutorStore((s) => s.sessionId);
@@ -797,8 +798,11 @@ const App = () => {
       (chunk) => {
         appendStreamingContent(chunk);
 
-        // Scroll to bottom after each chunk
-        scrollRef.current?.scrollToBottom();
+        const now = Date.now();
+        if (now - lastScrollTimeRef.current > 150) {
+          lastScrollTimeRef.current = now;
+          scrollRef.current?.scrollToBottom();
+        }
       },
       (fullResponse) => {
         const assistantMessage = fullResponse || "(No response from tutor.)";
@@ -818,6 +822,7 @@ const App = () => {
         );
         setDifficulty(updateDifficulty(difficulty, content));
         finishStreaming();
+        scrollRef.current?.scrollToBottom();
         streamControllerRef.current = null;
       },
       (error) => {
@@ -1057,4 +1062,8 @@ render(
   <ErrorBoundary>
     <App />
   </ErrorBoundary>,
+  {
+    incrementalRendering: true,
+    maxFps: 15,
+  },
 );
