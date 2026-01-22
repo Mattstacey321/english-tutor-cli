@@ -99,7 +99,7 @@ export const handleCommand = (
   switch (command) {
     case "/help":
       return {
-        message: `Commands: ${Object.keys(availableCommands).join(", ")}\nTip: To send a message starting with /, type //`,
+        message: `Commands: ${availableCommands.join(", ")}\nTip: To send a message starting with /, type //`,
       };
 
     case "/clear": {
