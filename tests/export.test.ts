@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import fs from 'node:fs';
-import { exportConversation, isValidExportFormat } from './export.js';
-import type { ChatMessage } from './providers/types.js';
+import { exportConversation, isValidExportFormat } from '../src/export.js';
+import type { ChatMessage } from '../src/providers/types.js';
 
 vi.mock('node:fs', () => ({
   default: {

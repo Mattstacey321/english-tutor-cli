@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { updateDifficulty } from './adaptive.js';
+import { updateDifficulty } from '../src/adaptive.js';
 
 describe('updateDifficulty', () => {
   it('returns current difficulty for empty message', () => {

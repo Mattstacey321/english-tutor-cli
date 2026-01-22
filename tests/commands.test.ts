@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { handleCommand, availableModes, type CommandContext, type CommandActions } from './commands.js';
-import type { ResolvedConfig } from './config.js';
+import { handleCommand, availableModes, type CommandContext, type CommandActions } from '../src/commands.js';
+import type { ResolvedConfig } from '../src/config.js';
 
-vi.mock('./storage.js', () => ({
+vi.mock('../src/storage.js', () => ({
   getSessionMessages: vi.fn(() => []),
   getSessionHistoryWithSummaries: vi.fn(() => []),
   getSessionWithSummary: vi.fn(() => null),
@@ -23,12 +23,12 @@ vi.mock('./storage.js', () => ({
   })),
 }));
 
-vi.mock('./export.js', () => ({
+vi.mock('../src/export.js', () => ({
   exportConversation: vi.fn(() => ({ filename: 'test.md', path: '/tmp' })),
   isValidExportFormat: vi.fn((f) => ['md', 'txt', 'json'].includes(f)),
 }));
 
-vi.mock('./summary.js', () => ({
+vi.mock('../src/summary.js', () => ({
   generateSessionSummary: vi.fn(),
   buildResumeContext: vi.fn(),
 }));
