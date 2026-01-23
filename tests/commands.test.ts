@@ -23,6 +23,10 @@ vi.mock('../src/storage.js', () => ({
   })),
 }));
 
+vi.mock('../src/vocab-definitions.js', () => ({
+  fetchDefinitions: vi.fn(async () => new Map([['test', 'a test word']])),
+}));
+
 vi.mock('../src/export.js', () => ({
   exportConversation: vi.fn(() => ({ filename: 'test.md', path: '/tmp' })),
   isValidExportFormat: vi.fn((f) => ['md', 'txt', 'json'].includes(f)),
@@ -57,7 +61,9 @@ describe('handleCommand', () => {
         error: null,
         path: '/tmp/config.json',
       },
-      provider: null,
+      provider: {
+        sendMessage: vi.fn(async () => "test: a test word definition"),
+      } as unknown as CommandContext['provider'],
     };
 
     mockActions = {
@@ -145,16 +151,30 @@ describe('handleCommand', () => {
   });
 
   describe('/save', () => {
-    it('saves vocabulary words to collection', () => {
+    it('saves vocabulary words to collection', async () => {
       const result = handleCommand('/save apple, banana fruits', mockCtx, mockActions);
-      expect(result?.message).toContain('Saved');
-      expect(result?.message).toContain('fruits');
+      expect(result).toBe(null);
+      expect(mockActions.setStatus).toHaveBeenCalledWith('thinking');
+      await new Promise((r) => setTimeout(r, 10));
+      expect(mockActions.addMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          role: 'assistant',
+          content: expect.stringContaining('Saved'),
+        })
+      );
     });
 
-    it('saves words to default collection when no collection specified', () => {
+    it('saves words to default collection when no collection specified', async () => {
       const result = handleCommand('/save hello', mockCtx, mockActions);
-      expect(result?.message).toContain('Saved');
-      expect(result?.message).toContain('default');
+      expect(result).toBe(null);
+      expect(mockActions.setStatus).toHaveBeenCalledWith('thinking');
+      await new Promise((r) => setTimeout(r, 10));
+      expect(mockActions.addMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          role: 'assistant',
+          content: expect.stringContaining('Saved'),
+        })
+      );
     });
 
     it('shows usage without words', () => {

@@ -1056,6 +1056,11 @@ const App = () => {
                     <Text bold color="yellow">
                       {vocabPractice.userInput || "_"}
                     </Text>
+                    {currentItem?.word && (
+                      <Text color="gray">
+                        {" "}({vocabPractice.userInput.length}/{currentItem.word.length})
+                      </Text>
+                    )}
                   </Box>
                   {vocabPractice.feedback && (
                     <Box marginTop={1}>

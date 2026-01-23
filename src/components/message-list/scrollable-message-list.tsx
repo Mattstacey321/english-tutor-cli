@@ -9,7 +9,9 @@ import {
 import { Box, Text, useStdout } from "ink";
 import { ScrollView, type ScrollViewRef } from "ink-scroll-view";
 import { ScrollBar } from "@byteland/ink-scroll-bar";
-import type { ChatMessage } from "../providers/types.js";
+import type { ChatMessage } from "../../providers/types.js";
+import { MessageItem } from "./message-item.js";
+import { AssistantMessage } from "./assistant-message.js";
 
 export interface ScrollableMessageListRef {
   scrollBy: (delta: number) => void;
@@ -135,43 +137,14 @@ export const ScrollableMessageList = forwardRef<
         overflow="hidden"
       >
         <ScrollView ref={scrollRef}>
-          {messages.map((message) => {
-            const isUser = message.role === "user";
-            const isAssistant = message.role === "assistant";
-
-            return (
-              <Box
-                key={message.id}
-                flexDirection="column"
-                marginBottom={1}
-                paddingX={1}
-              >
-                <Box flexDirection="row" alignItems="center">
-                  <Text
-                    bold
-                    color={isUser ? "green" : isAssistant ? "yellow" : "red"}
-                  >
-                    {isUser ? "👤 You" : isAssistant ? "🤖 Tutor" : "⚙️ System"}
-                  </Text>
-                </Box>
-                <Box marginTop={0.5} paddingLeft={2}>
-                  <Text wrap="wrap">{message.content}</Text>
-                </Box>
-              </Box>
-            );
-          })}
+          {messages.map((message) => (
+            <MessageItem key={message.id} message={message} />
+          ))}
           {isStreaming && (
-            <Box flexDirection="column" marginBottom={1} paddingX={1}>
-              <Box flexDirection="row" alignItems="center">
-                <Text bold color="yellow">
-                  🤖 Tutor
-                </Text>
-                <Text color="gray"> (streaming...)</Text>
-              </Box>
-              <Box marginTop={0.5} paddingLeft={2}>
-                <Text wrap="wrap">{streamingContent || "▊"}</Text>
-              </Box>
-            </Box>
+            <AssistantMessage
+              content={streamingContent || "▊"}
+              isStreaming
+            />
           )}
         </ScrollView>
       </Box>

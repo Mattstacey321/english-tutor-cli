@@ -22,6 +22,7 @@ import {
   getLearningStats,
   isValidWord,
 } from "./storage.js";
+import { fetchDefinitions } from "./vocab-definitions.js";
 import {
   exportConversation,
   isValidExportFormat,
@@ -440,12 +441,12 @@ export const commandRegistry: CommandDefinition[] = [
   {
     command: "/save",
     description: "Save vocabulary words",
-    handle: (value) => {
+    handle: (value, ctx, actions) => {
       const args = value.trim().split(/\s+/).slice(1);
       if (args.length === 0) {
         return {
           message:
-            "Usage: /save <word1, word2, ...> [collection] [--def \"definition\"]\nExample: /save apple, banana, cherry fruits\nExample: /save vocabulary --def \"a list of words\"\n\nNote: Without --def, words are saved with null definitions (use /save word --def for definitions)",
+            "Usage: /save <word1, word2, ...> [collection] [--def \"definition\"]\nExample: /save apple, banana, cherry fruits\nExample: /save vocabulary --def \"a list of words\"\n\nNote: Without --def, definitions are fetched from the AI.",
           isError: true,
         };
       }
@@ -493,16 +494,50 @@ export const commandRegistry: CommandDefinition[] = [
         return { message: `Failed to save "${result.word}": ${result.reason}`, isError: true };
       }
 
-      const items = words.map((w) => ({ word: w }));
-      const { success, failed } = saveVocabItemsWithDefs(items, collection);
-      
-      let message = `Saved ${success.length} word${success.length !== 1 ? "s" : ""} to "${collection}" collection.`;
-      if (failed.length > 0) {
-        const failedList = failed.map(f => `${f.word}: ${f.reason}`).join(", ");
-        message += `\n\nFailed to save: ${failedList}`;
+      const provider = ctx.provider;
+      if (!provider) {
+        return { message: "No AI provider configured.", isError: true };
       }
-      
-      return { message, isError: failed.length > 0 };
+
+      actions.setStatus("thinking");
+      fetchDefinitions(provider, words)
+        .then((definitions) => {
+          const items = words.map((w) => ({
+            word: w,
+            definition: definitions.get(w.toLowerCase()),
+          }));
+          
+          const { success, failed } = saveVocabItemsWithDefs(items, collection);
+          
+          let message = `Saved ${success.length} word${success.length !== 1 ? "s" : ""} to "${collection}" collection.`;
+          
+          const withDef = success.filter((s) => s.definition);
+          const withoutDef = success.filter((s) => !s.definition);
+          
+          if (withoutDef.length > 0) {
+            message += `\n\nNote: ${withoutDef.length} word(s) saved without definition (AI couldn't fetch definitions).`;
+          }
+          
+          if (failed.length > 0) {
+            const failedList = failed.map((f) => `${f.word}: ${f.reason}`).join(", ");
+            message += `\n\nFailed to save: ${failedList}`;
+          }
+          
+          actions.addMessage({
+            role: "assistant",
+            content: message,
+          });
+          actions.setStatus("idle");
+        })
+        .catch(() => {
+          actions.addMessage({
+            role: "assistant",
+            content: "(System) Failed to fetch definitions from AI.",
+          });
+          actions.setStatus("idle");
+        });
+
+      return null;
     },
     isPaletteCommand: true,
     getArgHints: saveArgHint,
@@ -526,16 +561,20 @@ export const commandRegistry: CommandDefinition[] = [
           };
         }
 
-        const grouped = new Map<string, string[]>();
+        const grouped = new Map<string, { word: string; definition: string | null }[]>();
         for (const item of items) {
           const col = item.collection;
           if (!grouped.has(col)) grouped.set(col, []);
-          grouped.get(col)!.push(item.word);
+          grouped.get(col)!.push({ word: item.word, definition: item.definition });
         }
 
         const lines: string[] = [];
-        for (const [col, vocabWords] of grouped) {
-          lines.push(`[${col}] ${vocabWords.join(", ")}`);
+        for (const [col, vocabItems] of grouped) {
+          lines.push(`[${col}]`);
+          for (const v of vocabItems) {
+            const defText = v.definition ? ` - ${v.definition}` : "";
+            lines.push(`  ${v.word}${defText}`);
+          }
         }
 
         return {
@@ -566,12 +605,13 @@ export const commandRegistry: CommandDefinition[] = [
       if (subcommand === "practice") {
         const hasTypeFlag = args.includes("--type");
         const hasMcFlag = args.includes("--mc");
+        const hasNoDefFlag = args.includes("--no-def");
         const mode = hasMcFlag ? "multiple-choice" : hasTypeFlag ? "type-answer" : "flashcard";
         
         const collection = args.slice(1).find((arg) => !arg.startsWith("--"));
-        const practiceItems = getVocabForPractice(collection, 10);
+        const allPracticeItems = getVocabForPractice(collection, 10);
 
-        if (practiceItems.length === 0) {
+        if (allPracticeItems.length === 0) {
           return {
             message: collection
               ? `No vocabulary in "${collection}" to practice.`
@@ -580,10 +620,42 @@ export const commandRegistry: CommandDefinition[] = [
           };
         }
 
+        let practiceItems = allPracticeItems;
+        const wordsWithoutDef = allPracticeItems.filter((w) => !w.definition);
+        
+        if (mode === "type-answer" || mode === "multiple-choice") {
+          practiceItems = allPracticeItems.filter((w) => w.definition);
+          
+          if (practiceItems.length === 0) {
+            return {
+              message: `No words with definitions found for "${mode}" mode.\n\nAll ${allPracticeItems.length} word(s) lack definitions.\nUse /save word --def "definition" to add definitions.`,
+              isError: true,
+            };
+          }
+          
+          if (wordsWithoutDef.length > 0) {
+            return {
+              message: `Warning: ${wordsWithoutDef.length} of ${allPracticeItems.length} words have no definition and will be skipped.\n\nUsing ${practiceItems.length} words with definitions for "${mode}" mode.`,
+              isError: false,
+            };
+          }
+        } else if (mode === "flashcard") {
+          if (wordsWithoutDef.length > 0 && !hasNoDefFlag) {
+            return {
+              message: `Warning: ${wordsWithoutDef.length} of ${allPracticeItems.length} words have no definition.\n\nUse /vocab practice --no-def to practice in flashcard mode without definitions, or add definitions with /save word --def "definition".`,
+              isError: true,
+            };
+          }
+          
+          if (wordsWithoutDef.length > 0 && hasNoDefFlag) {
+            practiceItems = allPracticeItems.filter((w) => w.definition);
+          }
+        }
+
         if (mode === "multiple-choice" && practiceItems.length < 4) {
           return {
-            message: "Multiple-choice mode requires at least 4 vocabulary words. Using flashcard mode instead.",
-            isError: false,
+            message: "Multiple-choice mode requires at least 4 vocabulary words with definitions.",
+            isError: true,
           };
         }
 
@@ -627,7 +699,7 @@ export const commandRegistry: CommandDefinition[] = [
 
       return {
         message:
-          "Usage: /vocab [list|stats|collections|practice] [collection] [--type|--mc]\nExamples:\n  /vocab - list all words\n  /vocab list fruits - list words in 'fruits' collection\n  /vocab stats - show statistics\n  /vocab collections - list all collections\n  /vocab practice - flashcard mode (default)\n  /vocab practice --type - type-the-answer mode\n  /vocab practice --mc - multiple-choice mode",
+          "Usage: /vocab [list|stats|collections|practice] [collection] [--type|--mc|--no-def]\nExamples:\n  /vocab - list all words\n  /vocab list fruits - list words in 'fruits' collection\n  /vocab stats - show statistics\n  /vocab collections - list all collections\n  /vocab practice - flashcard mode (requires definitions)\n  /vocab practice --type - type-the-answer mode (requires definitions)\n  /vocab practice --mc - multiple-choice mode (requires definitions)\n  /vocab practice --no-def - flashcard mode (allows words without definitions)",
         isError: true,
       };
     },
