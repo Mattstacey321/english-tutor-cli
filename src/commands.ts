@@ -17,6 +17,7 @@ import {
   getCollections,
   createCollection,
   getVocabForPractice,
+  getVocabDistractors,
   getLearningStats,
 } from "./storage.js";
 import {
@@ -36,6 +37,18 @@ import type {
 } from "./stores/tutor-store.js";
 
 export type CommandResult = { message: string; isError?: boolean } | null;
+export type CommandArgHint = { left: string; right?: string };
+export type CommandPaletteContext = {
+  providerName: string;
+  hasApiKey: boolean;
+};
+export type CommandPaletteItem = {
+  id: string;
+  left: string;
+  right?: string;
+  command: string;
+  disabled?: boolean;
+};
 
 export const availableModes: PracticeMode[] = [
   "general",
@@ -46,63 +59,87 @@ export const availableModes: PracticeMode[] = [
   "exam",
 ];
 
-const availableCommands = [
-  "/clear",
-  "/config",
-  "/difficulty",
-  "/mode",
-  "/export",
-  "/history",
-  "/resume",
-  "/rename",
-  "/summary",
-  "/save",
-  "/vocab",
-  "/stats",
-  "/models",
-  "/help",
-];
+export type CommandDefinition = {
+  command: string;
+  description: string;
+  handle: (value: string, ctx: CommandContext, actions: CommandActions) => CommandResult;
+  isPaletteCommand?: boolean;
+  getDisabledReason?: (ctx: CommandPaletteContext) => string | null;
+  getArgHints?: () => CommandArgHint[];
+};
 
 const formatModeHelp = () => `Modes: ${availableModes.join(", ")}`;
 
-export interface CommandContext {
-  sessionId: string;
-  history: ChatMessage[];
-  difficulty: Difficulty;
-  mode: PracticeMode;
-  resolvedConfig: ResolvedConfig;
-  configState: ConfigState;
-  provider: TutorProvider | null;
-}
+const exportFormatHints = (): CommandArgHint[] => [
+  { left: "md", right: "Export as markdown" },
+  { left: "txt", right: "Export as plain text" },
+  { left: "json", right: "Export as JSON" },
+];
 
-export interface CommandActions {
-  resetSession: (newSession?: boolean) => void;
-  setDifficulty: (difficulty: Difficulty) => void;
-  setMode: (mode: PracticeMode) => void;
-  setSessionId: (id: string) => void;
-  setHistory: (updater: (current: ChatMessage[]) => ChatMessage[]) => void;
-  setConfigState: (state: ConfigState) => void;
-  setStatus: (status: "idle" | "thinking" | "error") => void;
-  addMessage: (message: ChatMessage) => void;
-  setMainView: (view: MainView) => void;
-  setVocabPractice: (state: VocabPracticeState | null) => void;
-  openModelPalette: () => Promise<void>;
-}
+const saveArgHint = (): CommandArgHint[] => [
+  { left: "<word> <collection>", right: "Default collection if omitted" },
+];
 
-export const handleCommand = (
-  value: string,
-  ctx: CommandContext,
-  actions: CommandActions,
-): CommandResult => {
-  const [command, ...args] = value.trim().split(/\s+/);
+const renameArgHint = (): CommandArgHint[] => [
+  { left: "<session_id> <new_title>", right: "Rename a session" },
+];
 
-  switch (command) {
-    case "/help":
+const summaryArgHint = (): CommandArgHint[] => [
+  { left: "--regenerate", right: "Regenerate the session summary" },
+];
+
+const configArgHint = (): CommandArgHint[] => [
+  { left: "summary-model <model_id>", right: "Override summary model" },
+  { left: "summary-model --reset", right: "Use main model" },
+];
+
+const resumeArgHint = (): CommandArgHint[] => [
+  { left: "<session_id_prefix>", right: "Resume a session" },
+];
+
+const difficultyArgHint = (): CommandArgHint[] => [
+  { left: "beginner", right: "Set beginner difficulty" },
+  { left: "intermediate", right: "Set intermediate difficulty" },
+  { left: "advanced", right: "Set advanced difficulty" },
+];
+
+const clearArgHint = (): CommandArgHint[] => [
+  { left: "--new-session", right: "Reset with a new session id" },
+];
+
+const modeArgHint = (): CommandArgHint[] =>
+  availableModes.map((mode) => ({ left: mode, right: "Set practice mode" }));
+
+const vocabArgHint = (): CommandArgHint[] => [
+  { left: "list [collection]", right: "List vocabulary" },
+  { left: "stats", right: "Show vocabulary stats" },
+  { left: "collections", right: "List collections" },
+  { left: "practice [collection]", right: "Start practice" },
+];
+
+const statsArgHint = (): CommandArgHint[] => [
+  { left: "week", right: "Weekly stats" },
+  { left: "month", right: "Monthly stats" },
+];
+
+
+export const commandRegistry: CommandDefinition[] = [
+  {
+    command: "/help",
+    description: "Show help",
+    handle: () => {
+      const available = commandRegistry.map((entry) => entry.command).join(", ");
       return {
-        message: `Commands: ${availableCommands.join(", ")}\nTip: To send a message starting with /, type //`,
+        message: `Commands: ${available}\nTip: To send a message starting with /, type //`,
       };
-
-    case "/clear": {
+    },
+    isPaletteCommand: true,
+  },
+  {
+    command: "/clear",
+    description: "Clear conversation",
+    handle: (value, _ctx, actions) => {
+      const args = value.trim().split(/\s+/).slice(1);
       const newSession = args.includes("--new-session");
       actions.resetSession(newSession);
       return {
@@ -110,10 +147,66 @@ export const handleCommand = (
           ? "Conversation cleared. Started new session."
           : "Conversation cleared.",
       };
-    }
+    },
+    isPaletteCommand: true,
+    getArgHints: clearArgHint,
+  },
+  {
+    command: "/config",
+    description: "View or update config",
+    handle: (value, ctx, actions) => {
+      const args = value.trim().split(/\s+/).slice(1);
+      const key = args[0]?.toLowerCase();
+      const configValue = args.slice(1).join(" ");
 
-    case "/difficulty":
-    case "/diff": {
+      if (!key) {
+        const summaryModelDisplay = ctx.resolvedConfig.summaryModel ?? "(same as main)";
+        return {
+          message: `Current Configuration:\n\n  Provider: ${ctx.resolvedConfig.provider}\n  Model: ${ctx.resolvedConfig.model}\n  Summary Model: ${summaryModelDisplay}\n  Config Path: ${ctx.configState.path}\n\nUse /config <key> <value> to change settings.\nKeys: summary-model`,
+        };
+      }
+
+      if (key === "summary-model") {
+        if (!configValue) {
+          return {
+            message: `Summary model: ${ctx.resolvedConfig.summaryModel ?? "(same as main)"}`,
+          };
+        }
+        const isReset = configValue === "--reset" || configValue === "reset";
+        const nextConfig: TutorConfig = {
+          provider: ctx.resolvedConfig.provider,
+          model: ctx.resolvedConfig.model,
+          ...(ctx.configState.config?.apiKey
+            ? { apiKey: ctx.configState.config.apiKey }
+            : {}),
+          ...(isReset ? {} : { summaryModel: configValue }),
+        };
+        writeConfig(nextConfig);
+        actions.setConfigState({
+          config: nextConfig,
+          error: null,
+          path: ctx.configState.path,
+        });
+        return {
+          message: isReset
+            ? "Summary model reset to use main model."
+            : `Summary model set to ${configValue}.`,
+        };
+      }
+
+      return {
+        message: `Unknown config key: ${key}. Available: summary-model`,
+        isError: true,
+      };
+    },
+    isPaletteCommand: false,
+    getArgHints: configArgHint,
+  },
+  {
+    command: "/difficulty",
+    description: "Set difficulty",
+    handle: (value, ctx, actions) => {
+      const args = value.trim().split(/\s+/).slice(1);
       const validLevels: Difficulty[] = [
         "beginner",
         "intermediate",
@@ -133,9 +226,15 @@ export const handleCommand = (
         message: `Unknown difficulty. Options: ${validLevels.join(", ")}`,
         isError: true,
       };
-    }
-
-    case "/mode": {
+    },
+    isPaletteCommand: false,
+    getArgHints: difficultyArgHint,
+  },
+  {
+    command: "/mode",
+    description: "Choose practice mode",
+    handle: (value, _ctx, actions) => {
+      const args = value.trim().split(/\s+/).slice(1);
       const requested = (args[0] ?? "").toLowerCase();
       if (!requested) {
         return { message: formatModeHelp() };
@@ -145,12 +244,18 @@ export const handleCommand = (
         return { message: `Mode set to ${requested}.` };
       }
       return { message: `Unknown mode. ${formatModeHelp()}`, isError: true };
-    }
-
-    case "/export": {
+    },
+    isPaletteCommand: true,
+    getArgHints: modeArgHint,
+  },
+  {
+    command: "/export",
+    description: "Export chat",
+    handle: (value, ctx) => {
       if (ctx.history.length === 0) {
         return { message: "No messages to export.", isError: true };
       }
+      const args = value.trim().split(/\s+/).slice(1);
       const formatArg = (args[0] ?? "md").toLowerCase();
       if (!isValidExportFormat(formatArg)) {
         return {
@@ -169,14 +274,24 @@ export const handleCommand = (
         const msg = error instanceof Error ? error.message : "Export failed";
         return { message: msg, isError: true };
       }
-    }
-
-    case "/history": {
+    },
+    isPaletteCommand: true,
+    getArgHints: exportFormatHints,
+  },
+  {
+    command: "/history",
+    description: "View session history",
+    handle: (_value, _ctx, actions) => {
       actions.setMainView("sessionPicker");
       return null;
-    }
-
-    case "/resume": {
+    },
+    isPaletteCommand: true,
+  },
+  {
+    command: "/resume",
+    description: "Resume session",
+    handle: (value, ctx, actions) => {
+      const args = value.trim().split(/\s+/).slice(1);
       const targetId = args[0];
       if (!targetId) {
         actions.setMainView("sessionPicker");
@@ -224,66 +339,15 @@ export const handleCommand = (
       return {
         message: `Resumed session ${match.session_id.slice(0, 8)} with ${messages.length} messages. (Tip: Use /summary to generate a summary for faster resume next time)`,
       };
-    }
-
-    case "/models": {
-      if (!ctx.resolvedConfig.apiKey) {
-        return {
-          message: "API key required to list models.",
-          isError: true,
-        };
-      }
-      void actions.openModelPalette();
-      return null;
-    }
-
-    case "/config": {
-      const key = args[0]?.toLowerCase();
-      const configValue = args.slice(1).join(" ");
-
-      if (!key) {
-        const summaryModelDisplay =
-          ctx.resolvedConfig.summaryModel ?? "(same as main)";
-        return {
-          message: `Current Configuration:\n\n  Provider: ${ctx.resolvedConfig.provider}\n  Model: ${ctx.resolvedConfig.model}\n  Summary Model: ${summaryModelDisplay}\n  Config Path: ${ctx.configState.path}\n\nUse /config <key> <value> to change settings.\nKeys: summary-model`,
-        };
-      }
-
-      if (key === "summary-model") {
-        if (!configValue) {
-          return {
-            message: `Summary model: ${ctx.resolvedConfig.summaryModel ?? "(same as main)"}`,
-          };
-        }
-        const isReset = configValue === "--reset" || configValue === "reset";
-        const nextConfig: TutorConfig = {
-          provider: ctx.resolvedConfig.provider,
-          model: ctx.resolvedConfig.model,
-          ...(ctx.configState.config?.apiKey
-            ? { apiKey: ctx.configState.config.apiKey }
-            : {}),
-          ...(isReset ? {} : { summaryModel: configValue }),
-        };
-        writeConfig(nextConfig);
-        actions.setConfigState({
-          config: nextConfig,
-          error: null,
-          path: ctx.configState.path,
-        });
-        return {
-          message: isReset
-            ? "Summary model reset to use main model."
-            : `Summary model set to ${configValue}.`,
-        };
-      }
-
-      return {
-        message: `Unknown config key: ${key}. Available: summary-model`,
-        isError: true,
-      };
-    }
-
-    case "/rename": {
+    },
+    isPaletteCommand: false,
+    getArgHints: resumeArgHint,
+  },
+  {
+    command: "/rename",
+    description: "Rename session",
+    handle: (value) => {
+      const args = value.trim().split(/\s+/).slice(1);
       const targetId = args[0];
       const newTitle = args.slice(1).join(" ").trim();
       if (!targetId || !newTitle) {
@@ -311,9 +375,14 @@ export const handleCommand = (
       return {
         message: `Session ${match.session_id.slice(0, 8)} renamed to "${newTitle}".`,
       };
-    }
-
-    case "/summary": {
+    },
+    isPaletteCommand: true,
+    getArgHints: renameArgHint,
+  },
+  {
+    command: "/summary",
+    description: "Generate session summary",
+    handle: (value, ctx, actions) => {
       if (!ctx.provider) {
         return { message: "Provider not configured.", isError: true };
       }
@@ -321,6 +390,7 @@ export const handleCommand = (
         return { message: "No messages to summarize.", isError: true };
       }
 
+      const args = value.trim().split(/\s+/).slice(1);
       const existingSession = getSessionWithSummary(ctx.sessionId);
       if (existingSession?.summary && !args.includes("--regenerate")) {
         return {
@@ -361,10 +431,15 @@ export const handleCommand = (
         });
 
       return null;
-    }
-
-    case "/save":
-    case "/s": {
+    },
+    isPaletteCommand: true,
+    getArgHints: summaryArgHint,
+  },
+  {
+    command: "/save",
+    description: "Save vocabulary words",
+    handle: (value) => {
+      const args = value.trim().split(/\s+/).slice(1);
       if (args.length === 0) {
         return {
           message:
@@ -396,16 +471,20 @@ export const handleCommand = (
       return {
         message: `Saved ${saved} word${saved !== 1 ? "s" : ""} to "${collection}" collection.`,
       };
-    }
-
-    case "/vocab": {
+    },
+    isPaletteCommand: true,
+    getArgHints: saveArgHint,
+  },
+  {
+    command: "/vocab",
+    description: "View vocabulary",
+    handle: (value, _ctx, actions) => {
+      const args = value.trim().split(/\s+/).slice(1);
       const subcommand = args[0]?.toLowerCase();
 
       if (!subcommand || subcommand === "list") {
         const collection = args[1];
-        const items = collection
-          ? getVocabByCollection(collection)
-          : getAllVocab(50);
+        const items = collection ? getVocabByCollection(collection) : getAllVocab(50);
 
         if (items.length === 0) {
           return {
@@ -443,8 +522,7 @@ export const handleCommand = (
         const collections = getCollections();
         if (collections.length === 0) {
           return {
-            message:
-              "No collections yet. Words are saved to 'default' collection.",
+            message: "No collections yet. Words are saved to 'default' collection.",
           };
         }
         const lines = collections.map(
@@ -454,7 +532,11 @@ export const handleCommand = (
       }
 
       if (subcommand === "practice") {
-        const collection = args[1];
+        const hasTypeFlag = args.includes("--type");
+        const hasMcFlag = args.includes("--mc");
+        const mode = hasMcFlag ? "multiple-choice" : hasTypeFlag ? "type-answer" : "flashcard";
+        
+        const collection = args.slice(1).find((arg) => !arg.startsWith("--"));
         const practiceItems = getVocabForPractice(collection, 10);
 
         if (practiceItems.length === 0) {
@@ -466,15 +548,46 @@ export const handleCommand = (
           };
         }
 
-        actions.setVocabPractice({
-          items: practiceItems.map((item) => ({
+        if (mode === "multiple-choice" && practiceItems.length < 4) {
+          return {
+            message: "Multiple-choice mode requires at least 4 vocabulary words. Using flashcard mode instead.",
+            isError: false,
+          };
+        }
+
+        const items = practiceItems.map((item) => {
+          const base = {
             id: item.id,
             word: item.word,
             definition: item.definition,
-          })),
+          };
+
+          if (mode === "multiple-choice") {
+            const distractors = getVocabDistractors(item.word, collection, 3);
+            const allOptions = [item.word, ...distractors];
+            for (let i = allOptions.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [allOptions[i], allOptions[j]] = [allOptions[j], allOptions[i]];
+            }
+            return {
+              ...base,
+              mcOptions: allOptions,
+              mcCorrectIndex: allOptions.indexOf(item.word),
+            };
+          }
+
+          return base;
+        });
+
+        actions.setVocabPractice({
+          mode: mode as "flashcard" | "type-answer" | "multiple-choice",
+          items,
           currentIndex: 0,
           showAnswer: false,
           score: { correct: 0, incorrect: 0 },
+          userInput: "",
+          selectedOption: null,
+          feedback: null,
         });
         actions.setMainView("vocabPractice");
         return null;
@@ -482,12 +595,17 @@ export const handleCommand = (
 
       return {
         message:
-          "Usage: /vocab [list|stats|collections|practice] [collection]\nExamples:\n  /vocab - list all words\n  /vocab list fruits - list words in 'fruits' collection\n  /vocab stats - show statistics\n  /vocab collections - list all collections\n  /vocab practice - start practice session",
+          "Usage: /vocab [list|stats|collections|practice] [collection] [--type|--mc]\nExamples:\n  /vocab - list all words\n  /vocab list fruits - list words in 'fruits' collection\n  /vocab stats - show statistics\n  /vocab collections - list all collections\n  /vocab practice - flashcard mode (default)\n  /vocab practice --type - type-the-answer mode\n  /vocab practice --mc - multiple-choice mode",
         isError: true,
       };
-    }
-
-    case "/stats": {
+    },
+    isPaletteCommand: true,
+    getArgHints: vocabArgHint,
+  },
+  {
+    command: "/stats",
+    description: "View learning statistics",
+    handle: (_value, _ctx, _actions) => {
       const stats = getLearningStats();
 
       const sessionLines = [
@@ -549,9 +667,90 @@ export const handleCommand = (
       ].join("\n");
 
       return { message: output };
-    }
+    },
+    isPaletteCommand: true,
+    getArgHints: statsArgHint,
+  },
+  {
+    command: "/models",
+    description: "List models",
+    handle: (_value, ctx, actions) => {
+      if (!ctx.resolvedConfig.apiKey) {
+        return {
+          message: "API key required to list models.",
+          isError: true,
+        };
+      }
+      void actions.openModelPalette();
+      return null;
+    },
+    isPaletteCommand: true,
+    getDisabledReason: ({ hasApiKey }) =>
+      hasApiKey ? null : "API key required",
+  },
+];
 
-    default:
-      return { message: "Unknown command. Use /help.", isError: true };
+export const getPaletteItems = (
+  ctx: CommandPaletteContext,
+): CommandPaletteItem[] => {
+  return commandRegistry
+    .filter((entry) => entry.isPaletteCommand)
+    .map((entry) => {
+      const disabledReason = entry.getDisabledReason?.(ctx) ?? null;
+      return {
+        id: entry.command.slice(1),
+        left: entry.command,
+        right: disabledReason ? disabledReason : entry.description,
+        command: entry.command,
+        disabled: Boolean(disabledReason),
+      };
+    });
+};
+
+export const getCommandArgHints = (command: string): CommandArgHint[] => {
+  const entry = commandRegistry.find((item) => item.command === command);
+  return entry?.getArgHints?.() ?? [];
+};
+
+export const getKnownCommands = (): string[] =>
+  commandRegistry.map((entry) => entry.command);
+
+export const getCommandByName = (command: string): CommandDefinition | undefined =>
+  commandRegistry.find((entry) => entry.command === command);
+
+export interface CommandContext {
+  sessionId: string;
+  history: ChatMessage[];
+  difficulty: Difficulty;
+  mode: PracticeMode;
+  resolvedConfig: ResolvedConfig;
+  configState: ConfigState;
+  provider: TutorProvider | null;
+}
+
+export interface CommandActions {
+  resetSession: (newSession?: boolean) => void;
+  setDifficulty: (difficulty: Difficulty) => void;
+  setMode: (mode: PracticeMode) => void;
+  setSessionId: (id: string) => void;
+  setHistory: (updater: (current: ChatMessage[]) => ChatMessage[]) => void;
+  setConfigState: (state: ConfigState) => void;
+  setStatus: (status: "idle" | "thinking" | "error") => void;
+  addMessage: (message: ChatMessage) => void;
+  setMainView: (view: MainView) => void;
+  setVocabPractice: (state: VocabPracticeState | null) => void;
+  openModelPalette: () => Promise<void>;
+}
+
+export const handleCommand = (
+  value: string,
+  ctx: CommandContext,
+  actions: CommandActions,
+): CommandResult => {
+  const [command] = value.trim().split(/\s+/);
+  const entry = getCommandByName(command);
+  if (!entry) {
+    return { message: "Unknown command. Use /help.", isError: true };
   }
+  return entry.handle(value, ctx, actions);
 };

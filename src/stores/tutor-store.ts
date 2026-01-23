@@ -9,14 +9,27 @@ import type { SessionItem } from "../components/session-picker.js";
  
   export type Status = "idle" | "thinking" | "error";
   export type PaletteView = "commands" | "models";
-  export type PaletteSource = "slash" | "ctrlk" | null;
+  export type PaletteSource = "slash" | null;
   export type MainView = "chat" | "help" | "modePicker" | "modelsPicker" | "vocabPractice" | "sessionPicker";
+  export type QuizMode = "flashcard" | "type-answer" | "multiple-choice";
+
+  export interface VocabPracticeItem {
+    id: number;
+    word: string;
+    definition: string | null;
+    mcOptions?: string[];
+    mcCorrectIndex?: number;
+  }
   
   export interface VocabPracticeState {
-    items: { id: number; word: string; definition: string | null }[];
+    mode: QuizMode;
+    items: VocabPracticeItem[];
     currentIndex: number;
     showAnswer: boolean;
     score: { correct: number; incorrect: number };
+    userInput: string;
+    selectedOption: number | null;
+    feedback: { correct: boolean; message: string } | null;
   }
   
   export interface ConfigState {
@@ -109,6 +122,10 @@ import type { SessionItem } from "../components/session-picker.js";
     vocabPracticeNext: () => void;
     vocabPracticeAnswer: (correct: boolean) => void;
     vocabPracticeToggleAnswer: () => void;
+    vocabPracticeSetInput: (input: string) => void;
+    vocabPracticeSelectOption: (index: number) => void;
+    vocabPracticeSubmitAnswer: () => void;
+    vocabPracticeClearFeedback: () => void;
 
     // Actions - Session picker
     setSessionPickerSessions: (sessions: SessionItem[]) => void;
@@ -228,6 +245,9 @@ import type { SessionItem } from "../components/session-picker.js";
             ...state.vocabPractice,
             currentIndex: nextIndex,
             showAnswer: false,
+            userInput: "",
+            selectedOption: null,
+            feedback: null,
           },
         };
       }),
@@ -244,13 +264,80 @@ import type { SessionItem } from "../components/session-picker.js";
           },
         };
       }),
-        vocabPracticeToggleAnswer: () =>
+      vocabPracticeToggleAnswer: () =>
       set((state) => {
         if (!state.vocabPractice) return {};
         return {
           vocabPractice: {
             ...state.vocabPractice,
             showAnswer: !state.vocabPractice.showAnswer,
+          },
+        };
+      }),
+    vocabPracticeSetInput: (input) =>
+      set((state) => {
+        if (!state.vocabPractice) return {};
+        return {
+          vocabPractice: {
+            ...state.vocabPractice,
+            userInput: input,
+          },
+        };
+      }),
+    vocabPracticeSelectOption: (index) =>
+      set((state) => {
+        if (!state.vocabPractice) return {};
+        return {
+          vocabPractice: {
+            ...state.vocabPractice,
+            selectedOption: index,
+          },
+        };
+      }),
+    vocabPracticeSubmitAnswer: () =>
+      set((state) => {
+        if (!state.vocabPractice) return {};
+        const practice = state.vocabPractice;
+        const currentItem = practice.items[practice.currentIndex];
+        if (!currentItem) return {};
+
+        let isCorrect = false;
+        let message = "";
+
+        if (practice.mode === "type-answer") {
+          const userAnswer = practice.userInput.toLowerCase().trim();
+          const correctAnswer = currentItem.word.toLowerCase().trim();
+          isCorrect = userAnswer === correctAnswer;
+          message = isCorrect
+            ? "Correct!"
+            : `Incorrect. The answer was "${currentItem.word}"`;
+        } else if (practice.mode === "multiple-choice") {
+          if (practice.selectedOption === null) return {};
+          isCorrect = practice.selectedOption === currentItem.mcCorrectIndex;
+          message = isCorrect
+            ? "Correct!"
+            : `Incorrect. The answer was "${currentItem.word}"`;
+        }
+
+        return {
+          vocabPractice: {
+            ...practice,
+            showAnswer: true,
+            feedback: { correct: isCorrect, message },
+            score: {
+              correct: practice.score.correct + (isCorrect ? 1 : 0),
+              incorrect: practice.score.incorrect + (isCorrect ? 0 : 1),
+            },
+          },
+        };
+      }),
+    vocabPracticeClearFeedback: () =>
+      set((state) => {
+        if (!state.vocabPractice) return {};
+        return {
+          vocabPractice: {
+            ...state.vocabPractice,
+            feedback: null,
           },
         };
       }),

@@ -376,6 +376,26 @@ export const deleteCollection = (name: string): { deleted: boolean; wordsRemoved
   return { deleted: result.changes > 0, wordsRemoved: count };
 };
 
+export const getVocabDistractors = (excludeWord: string, collection?: string, count = 3): string[] => {
+  const stmt = collection
+    ? db.prepare(`
+        SELECT word FROM vocabulary
+        WHERE word != ? AND collection = ?
+        ORDER BY RANDOM()
+        LIMIT ?
+      `)
+    : db.prepare(`
+        SELECT word FROM vocabulary
+        WHERE word != ?
+        ORDER BY RANDOM()
+        LIMIT ?
+      `);
+  const results = (collection
+    ? stmt.all(excludeWord.toLowerCase().trim(), collection, count)
+    : stmt.all(excludeWord.toLowerCase().trim(), count)) as { word: string }[];
+  return results.map((r) => r.word);
+};
+
 export const getVocabStats = (): { total: number; mastered: number; learning: number; collections: number } => {
   const totalStmt = db.prepare(`SELECT COUNT(*) as count FROM vocabulary`);
   const total = (totalStmt.get() as { count: number }).count;

@@ -26,6 +26,9 @@ import { CommandPalette } from "./components/command-palette.js";
 import {
   handleCommand,
   availableModes,
+  getPaletteItems,
+  getCommandArgHints,
+  getKnownCommands,
   type CommandContext,
   type CommandActions,
   type CommandResult,
@@ -33,7 +36,7 @@ import {
 import {
   ScrollableMessageList,
   type ScrollableMessageListRef,
-} from "./components/scrollable-message-list.js";
+} from "./components/message-list/index.js";
 import { SessionPicker } from "./components/session-picker.js";
 import Spinner from "ink-spinner";
 import { SetupWizard } from "./layouts/setup-wizard.js";
@@ -156,6 +159,16 @@ const App = () => {
   const vocabPracticeToggleAnswer = useTutorStore(
     (s) => s.vocabPracticeToggleAnswer,
   );
+  const vocabPracticeSetInput = useTutorStore((s) => s.vocabPracticeSetInput);
+  const vocabPracticeSelectOption = useTutorStore(
+    (s) => s.vocabPracticeSelectOption,
+  );
+  const vocabPracticeSubmitAnswer = useTutorStore(
+    (s) => s.vocabPracticeSubmitAnswer,
+  );
+  const vocabPracticeClearFeedback = useTutorStore(
+    (s) => s.vocabPracticeClearFeedback,
+  );
 
   // Session picker state & actions
   const sessionPickerSessions = useTutorStore((s) => s.sessionPickerSessions);
@@ -191,73 +204,31 @@ const App = () => {
   const showSetup = setupMode || Boolean(resolvedConfig.error);
 
   const paletteItems: PaletteItem[] = useMemo(() => {
-    const items: PaletteItem[] = [
-      { id: "help", left: "/help", right: "Show help", command: "/help" },
-      {
-        id: "clear",
-        left: "/clear",
-        right: "Clear conversation",
-        command: "/clear",
-      },
-      {
-        id: "rename",
-        left: "/rename",
-        right: "Rename session",
-        command: "/rename",
-      },
-      {
-        id: "export",
-        left: "/export",
-        right: "Export chat",
-        command: "/export",
-      },
-      {
-        id: "history",
-        left: "/history",
-        right: "View session history",
-        command: "/history",
-      },
-      {
-        id: "mode",
-        left: "/mode",
-        right: "Choose practice mode",
-        command: "/mode",
-      },
-      {
-        id: "summary",
-        left: "/summary",
-        right: "Generate session summary",
-        command: "/summary",
-      },
-      {
-        id: "save",
-        left: "/save",
-        right: "Save vocabulary words",
-        command: "/save",
-      },
-      {
-        id: "vocab",
-        left: "/vocab",
-        right: "View vocabulary",
-        command: "/vocab",
-      },
-      {
-        id: "stats",
-        left: "/stats",
-        right: "View learning statistics",
-        command: "/stats",
-      },
-      {
-        id: "models",
-        left: "/models",
-        right: `List ${providerInfo.name} models`,
-        command: "/models",
-        disabled: !resolvedConfig.apiKey,
-      },
-    ];
-
-    return items;
+    return getPaletteItems({
+      providerName: providerInfo.name,
+      hasApiKey: Boolean(resolvedConfig.apiKey),
+    });
   }, [providerInfo.name, resolvedConfig.apiKey]);
+
+  const commandNames = useMemo(() => getKnownCommands(), []);
+
+  const commandArgHints = useMemo<Record<string, PaletteItem[]>>(() => {
+    const entries = commandNames.map((command) => {
+      const hints = getCommandArgHints(command).map((hint, index) => ({
+        id: `${command}-hint-${index}`,
+        left: hint.left,
+        right: hint.right,
+        disabled: true,
+      }));
+      return [command, hints] as const;
+    });
+    return Object.fromEntries(entries);
+  }, [commandNames]);
+
+  const knownCommands = useMemo(
+    () => new Set(commandNames),
+    [commandNames],
+  );
 
   const openModelPalette = async () => {
     setModelLoading(true);
@@ -342,12 +313,29 @@ const App = () => {
     });
   }, [modelError, modelItems, modelLoading]);
 
+  const isArgInput =
+    input.startsWith("/") && !input.startsWith("//") && input.includes(" ");
+
   const filteredPaletteItems = useMemo(() => {
     if (paletteView === "models") {
       return modelPaletteItems;
     }
 
     if (input.startsWith("/") && !input.startsWith("//")) {
+      const commandKey = input.split(/\s+/)[0]?.toLowerCase();
+      if (input.includes(" ")) {
+        return (
+          commandArgHints[commandKey] ?? [
+            {
+              id: "no-arg-hints",
+              left: "(none)",
+              right: "No argument tips available",
+              disabled: true,
+            },
+          ]
+        );
+      }
+
       const query = input.toLowerCase();
       const matches = paletteItems.filter((item) =>
         item.left.toLowerCase().startsWith(query),
@@ -365,7 +353,7 @@ const App = () => {
     }
 
     return paletteItems;
-  }, [paletteItems, modelPaletteItems, paletteView, input]);
+  }, [paletteItems, modelPaletteItems, paletteView, input, commandArgHints]);
 
   const runPaletteItem = (item: PaletteItem): boolean => {
     if (item.disabled) {
@@ -459,19 +447,15 @@ const App = () => {
   // Open/close palette based on slash input
   useEffect(() => {
     const isSlashCommand = input.startsWith("/") && !input.startsWith("//");
-    const hasArgs = isSlashCommand && input.includes(" ");
 
     const shouldOpen =
-      isSlashCommand &&
-      !hasArgs &&
-      status !== "thinking" &&
-      !providerInfo.error;
+      isSlashCommand && status !== "thinking" && !providerInfo.error;
 
     if (shouldOpen && !slashDismissed) {
       if (!paletteOpen) {
         openPalette("commands", "slash");
       }
-    } else if (!isSlashCommand || hasArgs) {
+    } else if (!isSlashCommand) {
       if (slashDismissed && !isSlashCommand) {
         setSlashDismissed(false);
       }
@@ -495,13 +479,18 @@ const App = () => {
   useEffect(() => {
     if (!paletteOpen) return;
 
+    if (isArgInput) {
+      setPaletteIndex(-1);
+      return;
+    }
+
     const validItems = filteredPaletteItems.filter((item) => !item.disabled);
     if (validItems.length === 1) {
       setPaletteIndex(0);
     } else if (paletteIndex >= filteredPaletteItems.length) {
       setPaletteIndex(0);
     }
-  }, [paletteOpen, paletteIndex, filteredPaletteItems, setPaletteIndex]);
+  }, [paletteOpen, paletteIndex, filteredPaletteItems, setPaletteIndex, isArgInput]);
 
   useInput((inputChar, key) => {
     if (inputChar === "\u0003") {
@@ -519,6 +508,14 @@ const App = () => {
     }
 
     if (paletteOpen) {
+      if (paletteSource === "slash" && isArgInput) {
+        if (key.escape) {
+          setSlashDismissed(true);
+          closePalette();
+        }
+        return;
+      }
+
       if (key.escape) {
         if (paletteSource === "slash") {
           setSlashDismissed(true);
@@ -580,26 +577,81 @@ const App = () => {
         return;
       }
 
-      if (!vocabPractice.showAnswer) {
-        if (inputChar === " ") {
-          vocabPracticeToggleAnswer();
-          return;
-        }
-      } else {
-        const currentItem = vocabPractice.items[vocabPractice.currentIndex];
-        if (inputChar.toLowerCase() === "y") {
-          vocabPracticeAnswer(true);
-          if (currentItem) updateVocabMastery(currentItem.id, true);
-          vocabPracticeNext();
-          return;
-        }
-        if (inputChar.toLowerCase() === "n") {
-          vocabPracticeAnswer(false);
-          if (currentItem) updateVocabMastery(currentItem.id, false);
-          vocabPracticeNext();
-          return;
+      const currentItem = vocabPractice.items[vocabPractice.currentIndex];
+
+      if (vocabPractice.mode === "flashcard") {
+        if (!vocabPractice.showAnswer) {
+          if (inputChar === " ") {
+            vocabPracticeToggleAnswer();
+            return;
+          }
+        } else {
+          if (inputChar.toLowerCase() === "y") {
+            vocabPracticeAnswer(true);
+            if (currentItem) updateVocabMastery(currentItem.id, true);
+            vocabPracticeNext();
+            return;
+          }
+          if (inputChar.toLowerCase() === "n") {
+            vocabPracticeAnswer(false);
+            if (currentItem) updateVocabMastery(currentItem.id, false);
+            vocabPracticeNext();
+            return;
+          }
         }
       }
+
+      if (vocabPractice.mode === "type-answer") {
+        if (vocabPractice.feedback) {
+          if (key.return || inputChar === " ") {
+            if (currentItem) {
+              updateVocabMastery(currentItem.id, vocabPractice.feedback.correct);
+            }
+            vocabPracticeClearFeedback();
+            vocabPracticeNext();
+            return;
+          }
+        } else {
+          if (key.return) {
+            vocabPracticeSubmitAnswer();
+            return;
+          }
+          if (key.backspace || key.delete) {
+            vocabPracticeSetInput(vocabPractice.userInput.slice(0, -1));
+            return;
+          }
+          if (inputChar && inputChar.length === 1 && !key.ctrl && !key.meta) {
+            vocabPracticeSetInput(vocabPractice.userInput + inputChar);
+            return;
+          }
+        }
+      }
+
+      if (vocabPractice.mode === "multiple-choice") {
+        if (vocabPractice.feedback) {
+          if (key.return || inputChar === " ") {
+            if (currentItem) {
+              updateVocabMastery(currentItem.id, vocabPractice.feedback.correct);
+            }
+            vocabPracticeClearFeedback();
+            vocabPracticeNext();
+            return;
+          }
+        } else {
+          const optionKeys = ["a", "b", "c", "d"];
+          const lowerChar = inputChar.toLowerCase();
+          const optionIndex = optionKeys.indexOf(lowerChar);
+          if (optionIndex !== -1 && currentItem?.mcOptions?.[optionIndex]) {
+            vocabPracticeSelectOption(optionIndex);
+            return;
+          }
+          if (key.return && vocabPractice.selectedOption !== null) {
+            vocabPracticeSubmitAnswer();
+            return;
+          }
+        }
+      }
+
       return;
     }
 
@@ -700,12 +752,6 @@ const App = () => {
       }
     }
 
-    if (key.ctrl && inputChar.toLowerCase() === "k") {
-      if (status !== "thinking" && !providerInfo.error) {
-        openPalette("commands", "ctrlk");
-      }
-      return;
-    }
   });
 
   useEffect(() => {
@@ -853,6 +899,14 @@ const App = () => {
     }
 
     if (trimmed.startsWith("/")) {
+      const commandKey = trimmed.split(/\s+/)[0]?.toLowerCase();
+      const hasArgs = trimmed.includes(" ");
+      if (paletteOpen && paletteSource === "slash" && !hasArgs) {
+        return;
+      }
+      if (!knownCommands.has(commandKey) && !hasArgs) {
+        return;
+      }
       selectCommand(trimmed);
       setInput("");
       return;
@@ -931,57 +985,145 @@ const App = () => {
         />
       )}
 
-      {mainView === "vocabPractice" && vocabPractice && (
-        <Box
-          flexDirection="column"
-          borderStyle="round"
-          borderColor="magenta"
-          padding={1}
-          height={messageListHeight}
-        >
-          <Box marginBottom={1}>
-            <Text bold color="magenta">
-              Vocabulary Practice
-            </Text>
-            <Text color="gray">
-              {" "}
-              ({vocabPractice.currentIndex + 1}/{vocabPractice.items.length}) |
-              Score: {vocabPractice.score.correct}/
-              {vocabPractice.score.correct + vocabPractice.score.incorrect}
-            </Text>
-          </Box>
+      {mainView === "vocabPractice" && vocabPractice && (() => {
+        const currentItem = vocabPractice.items[vocabPractice.currentIndex];
+        const modeLabel = vocabPractice.mode === "flashcard" ? "Flashcard" :
+          vocabPractice.mode === "type-answer" ? "Type Answer" : "Multiple Choice";
 
+        return (
           <Box
             flexDirection="column"
-            flexGrow={1}
-            justifyContent="center"
-            alignItems="center"
+            borderStyle="round"
+            borderColor="magenta"
+            padding={1}
+            height={messageListHeight}
           >
-            <Text bold color="cyan">
-              {vocabPractice.items[vocabPractice.currentIndex]?.word}
-            </Text>
-
-            {vocabPractice.showAnswer && (
-              <Box marginTop={1}>
-                <Text color="gray">
-                  {vocabPractice.items[vocabPractice.currentIndex]
-                    ?.definition || "(no definition)"}
-                </Text>
-              </Box>
-            )}
-          </Box>
-
-          <Box marginTop={1} justifyContent="center">
-            {!vocabPractice.showAnswer ? (
-              <Text color="gray">Press Space to reveal | Esc to exit</Text>
-            ) : (
-              <Text color="gray">
-                Press Y (correct) or N (incorrect) | Esc to exit
+            <Box marginBottom={1}>
+              <Text bold color="magenta">
+                Vocabulary Practice ({modeLabel})
               </Text>
-            )}
+              <Text color="gray">
+                {" "}
+                ({vocabPractice.currentIndex + 1}/{vocabPractice.items.length}) |
+                Score: {vocabPractice.score.correct}/
+                {vocabPractice.score.correct + vocabPractice.score.incorrect}
+              </Text>
+            </Box>
+
+            <Box
+              flexDirection="column"
+              flexGrow={1}
+              justifyContent="center"
+              alignItems="center"
+            >
+              {vocabPractice.mode === "flashcard" && (
+                <>
+                  <Text bold color="cyan">
+                    {currentItem?.word}
+                  </Text>
+                  {vocabPractice.showAnswer && (
+                    <Box marginTop={1}>
+                      <Text color="gray">
+                        {currentItem?.definition || "(no definition)"}
+                      </Text>
+                    </Box>
+                  )}
+                </>
+              )}
+
+              {vocabPractice.mode === "type-answer" && (
+                <>
+                  <Text color="gray">What word matches this definition?</Text>
+                  <Box marginTop={1}>
+                    <Text bold color="cyan">
+                      {currentItem?.definition || "(no definition)"}
+                    </Text>
+                  </Box>
+                  <Box marginTop={1}>
+                    <Text>Your answer: </Text>
+                    <Text bold color="yellow">
+                      {vocabPractice.userInput || "_"}
+                    </Text>
+                  </Box>
+                  {vocabPractice.feedback && (
+                    <Box marginTop={1}>
+                      <Text color={vocabPractice.feedback.correct ? "green" : "red"}>
+                        {vocabPractice.feedback.message}
+                      </Text>
+                    </Box>
+                  )}
+                </>
+              )}
+
+              {vocabPractice.mode === "multiple-choice" && (
+                <>
+                  <Text color="gray">What word matches this definition?</Text>
+                  <Box marginTop={1}>
+                    <Text bold color="cyan">
+                      {currentItem?.definition || "(no definition)"}
+                    </Text>
+                  </Box>
+                  <Box marginTop={1} flexDirection="column">
+                    {currentItem?.mcOptions?.map((option, idx) => {
+                      const letter = String.fromCharCode(65 + idx);
+                      const isSelected = vocabPractice.selectedOption === idx;
+                      const isCorrect = vocabPractice.feedback && idx === currentItem.mcCorrectIndex;
+                      const isWrong = vocabPractice.feedback && isSelected && !vocabPractice.feedback.correct;
+                      
+                      let color: string = "white";
+                      if (isCorrect) color = "green";
+                      else if (isWrong) color = "red";
+                      else if (isSelected) color = "yellow";
+
+                      return (
+                        <Box key={idx}>
+                          <Text color={color}>
+                            {isSelected ? "▸ " : "  "}
+                            {letter}. {option}
+                          </Text>
+                        </Box>
+                      );
+                    })}
+                  </Box>
+                  {vocabPractice.feedback && (
+                    <Box marginTop={1}>
+                      <Text color={vocabPractice.feedback.correct ? "green" : "red"}>
+                        {vocabPractice.feedback.message}
+                      </Text>
+                    </Box>
+                  )}
+                </>
+              )}
+            </Box>
+
+            <Box marginTop={1} justifyContent="center">
+              {vocabPractice.mode === "flashcard" && (
+                !vocabPractice.showAnswer ? (
+                  <Text color="gray">Press Space to reveal | Esc to exit</Text>
+                ) : (
+                  <Text color="gray">
+                    Press Y (correct) or N (incorrect) | Esc to exit
+                  </Text>
+                )
+              )}
+              {vocabPractice.mode === "type-answer" && (
+                vocabPractice.feedback ? (
+                  <Text color="gray">Press Enter or Space to continue | Esc to exit</Text>
+                ) : (
+                  <Text color="gray">Type your answer and press Enter | Esc to exit</Text>
+                )
+              )}
+              {vocabPractice.mode === "multiple-choice" && (
+                vocabPractice.feedback ? (
+                  <Text color="gray">Press Enter or Space to continue | Esc to exit</Text>
+                ) : (
+                  <Text color="gray">Press A/B/C/D to select, Enter to confirm | Esc to exit</Text>
+                )
+              )}
+            </Box>
           </Box>
-        </Box>
-      )}
+        );
+      })()}
 
       {!isFullscreenView && (
         <Box
@@ -1022,7 +1164,7 @@ const App = () => {
             value={input}
             onChange={setInput}
             onSubmit={handleSubmit}
-            placeholder="Type your message... (Ctrl+K for commands)"
+            placeholder="Type your message..."
             showCursor={true}
             focus={
               !providerInfo.error &&
@@ -1049,8 +1191,7 @@ const App = () => {
           paddingX={1}
         >
           <Text color="gray">
-            <Text bold>Ctrl+K</Text> Commands | <Text bold>Ctrl+C</Text> Exit |{" "}
-            <Text bold>↑↓</Text> Scroll
+            <Text bold>Ctrl+C</Text> Exit | <Text bold>↑↓</Text> Scroll
           </Text>
         </Box>
       )}
