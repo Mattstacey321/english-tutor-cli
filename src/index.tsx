@@ -580,7 +580,16 @@ const App = () => {
       const currentItem = vocabPractice.items[vocabPractice.currentIndex];
 
       if (vocabPractice.mode === "flashcard") {
-        if (!vocabPractice.showAnswer) {
+        if (vocabPractice.feedback) {
+          if (key.return || inputChar === " ") {
+            if (currentItem) {
+              updateVocabMastery(currentItem.id, vocabPractice.feedback.correct);
+            }
+            vocabPracticeClearFeedback();
+            vocabPracticeNext();
+            return;
+          }
+        } else if (!vocabPractice.showAnswer) {
           if (inputChar === " ") {
             vocabPracticeToggleAnswer();
             return;
@@ -588,14 +597,10 @@ const App = () => {
         } else {
           if (inputChar.toLowerCase() === "y") {
             vocabPracticeAnswer(true);
-            if (currentItem) updateVocabMastery(currentItem.id, true);
-            vocabPracticeNext();
             return;
           }
           if (inputChar.toLowerCase() === "n") {
             vocabPracticeAnswer(false);
-            if (currentItem) updateVocabMastery(currentItem.id, false);
-            vocabPracticeNext();
             return;
           }
         }
@@ -1028,6 +1033,13 @@ const App = () => {
                       </Text>
                     </Box>
                   )}
+                  {vocabPractice.feedback && (
+                    <Box marginTop={1}>
+                      <Text color={vocabPractice.feedback.correct ? "green" : "red"}>
+                        {vocabPractice.feedback.message}
+                      </Text>
+                    </Box>
+                  )}
                 </>
               )}
 
@@ -1098,7 +1110,9 @@ const App = () => {
 
             <Box marginTop={1} justifyContent="center">
               {vocabPractice.mode === "flashcard" && (
-                !vocabPractice.showAnswer ? (
+                vocabPractice.feedback ? (
+                  <Text color="gray">Press Enter or Space to continue | Esc to exit</Text>
+                ) : !vocabPractice.showAnswer ? (
                   <Text color="gray">Press Space to reveal | Esc to exit</Text>
                 ) : (
                   <Text color="gray">

@@ -10,7 +10,8 @@ import {
   getSessionWithSummary,
   updateSessionSummary,
   updateSessionTitle,
-  saveVocabItems,
+  saveVocabItem,
+  saveVocabItemsWithDefs,
   getVocabByCollection,
   getAllVocab,
   getVocabStats,
@@ -19,6 +20,7 @@ import {
   getVocabForPractice,
   getVocabDistractors,
   getLearningStats,
+  isValidWord,
 } from "./storage.js";
 import {
   exportConversation,
@@ -443,17 +445,26 @@ export const commandRegistry: CommandDefinition[] = [
       if (args.length === 0) {
         return {
           message:
-            "Usage: /save <word1, word2, ...> [collection]\nExample: /save apple, banana, cherry fruits",
+            "Usage: /save <word1, word2, ...> [collection] [--def \"definition\"]\nExample: /save apple, banana, cherry fruits\nExample: /save vocabulary --def \"a list of words\"\n\nNote: Without --def, words are saved with null definitions (use /save word --def for definitions)",
           isError: true,
         };
       }
 
-      const lastArg = args[args.length - 1];
-      const hasCollection = args.length > 1 && !lastArg.includes(",");
+      const defIndex = args.findIndex((a) => a === "--def");
+      let manualDef: string | undefined;
+      let remainingArgs = args;
+      
+      if (defIndex !== -1) {
+        manualDef = args.slice(defIndex + 1).join(" ").replace(/^"|"$/g, "");
+        remainingArgs = args.slice(0, defIndex);
+      }
+
+      const lastArg = remainingArgs[remainingArgs.length - 1];
+      const hasCollection = remainingArgs.length > 1 && !lastArg.includes(",");
       const collection = hasCollection ? lastArg.toLowerCase() : "default";
       const wordsArg = hasCollection
-        ? args.slice(0, -1).join(" ")
-        : args.join(" ");
+        ? remainingArgs.slice(0, -1).join(" ")
+        : remainingArgs.join(" ");
       const words = wordsArg
         .split(",")
         .map((w) => w.trim())
@@ -467,10 +478,31 @@ export const commandRegistry: CommandDefinition[] = [
         createCollection(collection);
       }
 
-      const saved = saveVocabItems(words, collection);
-      return {
-        message: `Saved ${saved} word${saved !== 1 ? "s" : ""} to "${collection}" collection.`,
-      };
+      if (manualDef && words.length > 1) {
+        return {
+          message: "The --def flag can only be used with a single word.\nExample: /save word --def \"definition\"",
+          isError: true,
+        };
+      }
+
+      if (manualDef && words.length === 1) {
+        const result = saveVocabItem(words[0], { definition: manualDef, collection });
+        if (result.saved) {
+          return { message: `Saved "${result.word}" with definition to "${collection}" collection.` };
+        }
+        return { message: `Failed to save "${result.word}": ${result.reason}`, isError: true };
+      }
+
+      const items = words.map((w) => ({ word: w }));
+      const { success, failed } = saveVocabItemsWithDefs(items, collection);
+      
+      let message = `Saved ${success.length} word${success.length !== 1 ? "s" : ""} to "${collection}" collection.`;
+      if (failed.length > 0) {
+        const failedList = failed.map(f => `${f.word}: ${f.reason}`).join(", ");
+        message += `\n\nFailed to save: ${failedList}`;
+      }
+      
+      return { message, isError: failed.length > 0 };
     },
     isPaletteCommand: true,
     getArgHints: saveArgHint,

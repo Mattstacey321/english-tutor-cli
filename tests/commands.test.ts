@@ -7,7 +7,7 @@ vi.mock('../src/storage.js', () => ({
   getSessionHistoryWithSummaries: vi.fn(() => []),
   getSessionWithSummary: vi.fn(() => null),
   updateSessionSummary: vi.fn(),
-  saveVocabItems: vi.fn(() => 3),
+  saveVocabItemsWithDefs: vi.fn(() => ({ success: [{ word: 'test' }], failed: [] })),
   getVocabByCollection: vi.fn(() => []),
   getAllVocab: vi.fn(() => []),
   getVocabStats: vi.fn(() => ({ total: 10, mastered: 3, learning: 7, collections: 2 })),

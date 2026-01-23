@@ -254,9 +254,12 @@ import type { SessionItem } from "../components/session-picker.js";
     vocabPracticeAnswer: (correct) =>
       set((state) => {
         if (!state.vocabPractice) return {};
+        const currentItem = state.vocabPractice.items[state.vocabPractice.currentIndex];
+        const message = correct ? "Correct!" : `Incorrect. The answer was "${currentItem?.word}"`;
         return {
           vocabPractice: {
             ...state.vocabPractice,
+            feedback: { correct, message },
             score: {
               correct: state.vocabPractice.score.correct + (correct ? 1 : 0),
               incorrect: state.vocabPractice.score.incorrect + (correct ? 0 : 1),

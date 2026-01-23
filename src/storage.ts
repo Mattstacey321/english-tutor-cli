@@ -256,34 +256,96 @@ const insertVocab = db.prepare(`
     example = COALESCE(excluded.example, vocabulary.example)
 `);
 
+const VALID_WORD_REGEX = /^[a-zA-Z0-9\s\-']+$/;
+
+export const isValidWord = (word: string): boolean => {
+  const trimmed = word.trim();
+  if (!trimmed) return false;
+  if (trimmed.length > 100) return false;
+  return VALID_WORD_REGEX.test(trimmed);
+};
+
 export const saveVocabItem = (
   word: string,
   options: { definition?: string; example?: string; collection?: string } = {}
-): void => {
+): { saved: boolean; word: string; reason?: string } => {
+  if (!isValidWord(word)) {
+    return { saved: false, word, reason: "Invalid word format" };
+  }
+  
   const now = new Date().toISOString();
   insertVocab.run(
     word.toLowerCase().trim(),
-    options.definition ?? null,
-    options.example ?? null,
+    options.definition?.trim() ?? null,
+    options.example?.trim() ?? null,
     options.collection ?? "default",
     now
   );
+  return { saved: true, word };
 };
 
 export const saveVocabItems = (
   words: string[],
   collection = "default"
-): number => {
+): { success: { word: string; definition?: string }[]; failed: { word: string; reason: string }[] } => {
   const now = new Date().toISOString();
-  let saved = 0;
+  const success: { word: string; definition?: string }[] = [];
+  const failed: { word: string; reason: string }[] = [];
+  
   for (const word of words) {
-    const trimmed = word.toLowerCase().trim();
-    if (trimmed) {
-      insertVocab.run(trimmed, null, null, collection, now);
-      saved++;
+    const trimmed = word.trim();
+    if (!trimmed) {
+      failed.push({ word, reason: "Empty word" });
+      continue;
     }
+    
+    if (!isValidWord(trimmed)) {
+      failed.push({ word: trimmed, reason: "Invalid format (use letters, numbers, hyphens, apostrophes, spaces only)" });
+      continue;
+    }
+    
+    if (trimmed.length > 100) {
+      failed.push({ word: trimmed, reason: "Word too long (max 100 chars)" });
+      continue;
+    }
+    
+    insertVocab.run(trimmed.toLowerCase(), null, null, collection, now);
+    success.push({ word: trimmed });
   }
-  return saved;
+  
+  return { success, failed };
+};
+
+export const saveVocabItemsWithDefs = (
+  items: { word: string; definition?: string }[],
+  collection = "default"
+): { success: { word: string; definition?: string }[]; failed: { word: string; reason: string }[] } => {
+  const now = new Date().toISOString();
+  const success: { word: string; definition?: string }[] = [];
+  const failed: { word: string; reason: string }[] = [];
+  
+  for (const item of items) {
+    const trimmed = item.word.trim();
+    if (!trimmed) {
+      failed.push({ word: item.word, reason: "Empty word" });
+      continue;
+    }
+    
+    if (!isValidWord(trimmed)) {
+      failed.push({ word: trimmed, reason: "Invalid format (use letters, numbers, hyphens, apostrophes, spaces only)" });
+      continue;
+    }
+    
+    if (trimmed.length > 100) {
+      failed.push({ word: trimmed, reason: "Word too long (max 100 chars)" });
+      continue;
+    }
+    
+    insertVocab.run(trimmed.toLowerCase(), item.definition?.trim() ?? null, null, collection, now);
+    success.push({ word: trimmed, definition: item.definition?.trim() });
+  }
+  
+  return { success, failed };
 };
 
 export const getVocabByCollection = (collection = "default", limit = 50): VocabItem[] => {
