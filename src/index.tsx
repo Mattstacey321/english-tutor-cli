@@ -1,8 +1,27 @@
-import { useEffect, useMemo, useRef } from "react";
-import { randomUUID } from "node:crypto";
-import { render, Box, Text, useApp, useInput } from "ink";
+import { Box, render, Text, useApp, useInput } from "ink";
+import Spinner from "ink-spinner";
 import TextInput from "ink-text-input";
+import { randomUUID } from "node:crypto";
+import { useEffect, useMemo, useRef } from "react";
 import { updateDifficulty } from "./adaptive.js";
+import {
+  availableModes,
+  getCommandArgHints,
+  getKnownCommands,
+  getPaletteItems,
+  handleCommand,
+  type CommandActions,
+  type CommandContext,
+  type CommandResult,
+} from "./commands.js";
+import { CommandPalette } from "./components/command-palette.js";
+import { ErrorBoundary } from "./components/error-boundary.js";
+import {
+  ScrollableMessageList,
+  type ScrollableMessageListRef,
+} from "./components/message-list/index.js";
+import { SessionPicker } from "./components/session-picker.js";
+import { VocabPracticeView } from "./components/vocab-practice/vocab-practice-view.js";
 import {
   readConfig,
   resolveConfig,
@@ -10,38 +29,20 @@ import {
   type ResolvedConfig,
   type TutorConfig,
 } from "./config.js";
+import type { PracticeMode } from "./conversation.js";
 import { buildTutorPrompt } from "./conversation.js";
+import { useTerminalSize } from "./hooks/use-terminal-size.js";
+import { SetupWizard } from "./layouts/setup-wizard.js";
 import { createGeminiProvider, listGeminiModels } from "./providers/gemini.js";
 import { createOpenAIProvider, listOpenAIModels } from "./providers/openai.js";
-import type { TutorProvider, ChatMessage } from "./providers/types.js";
+import type { ChatMessage, TutorProvider } from "./providers/types.js";
 import {
-  saveMessage,
-  updateVocabMastery,
   getSessionHistoryWithSummaries,
   getSessionMessages,
+  saveMessage,
+  updateVocabMastery,
 } from "./storage.js";
 import { useTutorStore } from "./stores/tutor-store.js";
-import type { PracticeMode } from "./conversation.js";
-import { CommandPalette } from "./components/command-palette.js";
-import {
-  handleCommand,
-  availableModes,
-  getPaletteItems,
-  getCommandArgHints,
-  getKnownCommands,
-  type CommandContext,
-  type CommandActions,
-  type CommandResult,
-} from "./commands.js";
-import {
-  ScrollableMessageList,
-  type ScrollableMessageListRef,
-} from "./components/message-list/index.js";
-import { SessionPicker } from "./components/session-picker.js";
-import Spinner from "ink-spinner";
-import { SetupWizard } from "./layouts/setup-wizard.js";
-import { ErrorBoundary } from "./components/error-boundary.js";
-import { useTerminalSize } from "./hooks/use-terminal-size.js";
 
 type PaletteItem = {
   id: string;
@@ -225,10 +226,7 @@ const App = () => {
     return Object.fromEntries(entries);
   }, [commandNames]);
 
-  const knownCommands = useMemo(
-    () => new Set(commandNames),
-    [commandNames],
-  );
+  const knownCommands = useMemo(() => new Set(commandNames), [commandNames]);
 
   const openModelPalette = async () => {
     setModelLoading(true);
@@ -490,7 +488,13 @@ const App = () => {
     } else if (paletteIndex >= filteredPaletteItems.length) {
       setPaletteIndex(0);
     }
-  }, [paletteOpen, paletteIndex, filteredPaletteItems, setPaletteIndex, isArgInput]);
+  }, [
+    paletteOpen,
+    paletteIndex,
+    filteredPaletteItems,
+    setPaletteIndex,
+    isArgInput,
+  ]);
 
   useInput((inputChar, key) => {
     if (inputChar === "\u0003") {
@@ -583,7 +587,10 @@ const App = () => {
         if (vocabPractice.feedback) {
           if (key.return || inputChar === " ") {
             if (currentItem) {
-              updateVocabMastery(currentItem.id, vocabPractice.feedback.correct);
+              updateVocabMastery(
+                currentItem.id,
+                vocabPractice.feedback.correct,
+              );
             }
             vocabPracticeClearFeedback();
             vocabPracticeNext();
@@ -610,7 +617,10 @@ const App = () => {
         if (vocabPractice.feedback) {
           if (key.return || inputChar === " ") {
             if (currentItem) {
-              updateVocabMastery(currentItem.id, vocabPractice.feedback.correct);
+              updateVocabMastery(
+                currentItem.id,
+                vocabPractice.feedback.correct,
+              );
             }
             vocabPracticeClearFeedback();
             vocabPracticeNext();
@@ -636,7 +646,10 @@ const App = () => {
         if (vocabPractice.feedback) {
           if (key.return || inputChar === " ") {
             if (currentItem) {
-              updateVocabMastery(currentItem.id, vocabPractice.feedback.correct);
+              updateVocabMastery(
+                currentItem.id,
+                vocabPractice.feedback.correct,
+              );
             }
             vocabPracticeClearFeedback();
             vocabPracticeNext();
@@ -756,7 +769,6 @@ const App = () => {
         return;
       }
     }
-
   });
 
   useEffect(() => {
@@ -990,159 +1002,12 @@ const App = () => {
         />
       )}
 
-      {mainView === "vocabPractice" && vocabPractice && (() => {
-        const currentItem = vocabPractice.items[vocabPractice.currentIndex];
-        const modeLabel = vocabPractice.mode === "flashcard" ? "Flashcard" :
-          vocabPractice.mode === "type-answer" ? "Type Answer" : "Multiple Choice";
-
-        return (
-          <Box
-            flexDirection="column"
-            borderStyle="round"
-            borderColor="magenta"
-            padding={1}
-            height={messageListHeight}
-          >
-            <Box marginBottom={1}>
-              <Text bold color="magenta">
-                Vocabulary Practice ({modeLabel})
-              </Text>
-              <Text color="gray">
-                {" "}
-                ({vocabPractice.currentIndex + 1}/{vocabPractice.items.length}) |
-                Score: {vocabPractice.score.correct}/
-                {vocabPractice.score.correct + vocabPractice.score.incorrect}
-              </Text>
-            </Box>
-
-            <Box
-              flexDirection="column"
-              flexGrow={1}
-              justifyContent="center"
-              alignItems="center"
-            >
-              {vocabPractice.mode === "flashcard" && (
-                <>
-                  <Text bold color="cyan">
-                    {currentItem?.word}
-                  </Text>
-                  {vocabPractice.showAnswer && (
-                    <Box marginTop={1}>
-                      <Text color="gray">
-                        {currentItem?.definition || "(no definition)"}
-                      </Text>
-                    </Box>
-                  )}
-                  {vocabPractice.feedback && (
-                    <Box marginTop={1}>
-                      <Text color={vocabPractice.feedback.correct ? "green" : "red"}>
-                        {vocabPractice.feedback.message}
-                      </Text>
-                    </Box>
-                  )}
-                </>
-              )}
-
-              {vocabPractice.mode === "type-answer" && (
-                <>
-                  <Text color="gray">What word matches this definition?</Text>
-                  <Box marginTop={1}>
-                    <Text bold color="cyan">
-                      {currentItem?.definition || "(no definition)"}
-                    </Text>
-                  </Box>
-                  <Box marginTop={1}>
-                    <Text>Your answer: </Text>
-                    <Text bold color="yellow">
-                      {vocabPractice.userInput || "_"}
-                    </Text>
-                    {currentItem?.word && (
-                      <Text color="gray">
-                        {" "}({vocabPractice.userInput.length}/{currentItem.word.length})
-                      </Text>
-                    )}
-                  </Box>
-                  {vocabPractice.feedback && (
-                    <Box marginTop={1}>
-                      <Text color={vocabPractice.feedback.correct ? "green" : "red"}>
-                        {vocabPractice.feedback.message}
-                      </Text>
-                    </Box>
-                  )}
-                </>
-              )}
-
-              {vocabPractice.mode === "multiple-choice" && (
-                <>
-                  <Text color="gray">What word matches this definition?</Text>
-                  <Box marginTop={1}>
-                    <Text bold color="cyan">
-                      {currentItem?.definition || "(no definition)"}
-                    </Text>
-                  </Box>
-                  <Box marginTop={1} flexDirection="column">
-                    {currentItem?.mcOptions?.map((option, idx) => {
-                      const letter = String.fromCharCode(65 + idx);
-                      const isSelected = vocabPractice.selectedOption === idx;
-                      const isCorrect = vocabPractice.feedback && idx === currentItem.mcCorrectIndex;
-                      const isWrong = vocabPractice.feedback && isSelected && !vocabPractice.feedback.correct;
-                      
-                      let color: string = "white";
-                      if (isCorrect) color = "green";
-                      else if (isWrong) color = "red";
-                      else if (isSelected) color = "yellow";
-
-                      return (
-                        <Box key={idx}>
-                          <Text color={color}>
-                            {isSelected ? "▸ " : "  "}
-                            {letter}. {option}
-                          </Text>
-                        </Box>
-                      );
-                    })}
-                  </Box>
-                  {vocabPractice.feedback && (
-                    <Box marginTop={1}>
-                      <Text color={vocabPractice.feedback.correct ? "green" : "red"}>
-                        {vocabPractice.feedback.message}
-                      </Text>
-                    </Box>
-                  )}
-                </>
-              )}
-            </Box>
-
-            <Box marginTop={1} justifyContent="center">
-              {vocabPractice.mode === "flashcard" && (
-                vocabPractice.feedback ? (
-                  <Text color="gray">Press Enter or Space to continue | Esc to exit</Text>
-                ) : !vocabPractice.showAnswer ? (
-                  <Text color="gray">Press Space to reveal | Esc to exit</Text>
-                ) : (
-                  <Text color="gray">
-                    Press Y (correct) or N (incorrect) | Esc to exit
-                  </Text>
-                )
-              )}
-              {vocabPractice.mode === "type-answer" && (
-                vocabPractice.feedback ? (
-                  <Text color="gray">Press Enter or Space to continue | Esc to exit</Text>
-                ) : (
-                  <Text color="gray">Type your answer and press Enter | Esc to exit</Text>
-                )
-              )}
-              {vocabPractice.mode === "multiple-choice" && (
-                vocabPractice.feedback ? (
-                  <Text color="gray">Press Enter or Space to continue | Esc to exit</Text>
-                ) : (
-                  <Text color="gray">Press A/B/C/D to select, Enter to confirm | Esc to exit</Text>
-                )
-              )}
-            </Box>
-          </Box>
-        );
-      })()}
+      {mainView === "vocabPractice" && vocabPractice && (
+        <VocabPracticeView
+          vocabPractice={vocabPractice}
+          height={messageListHeight}
+        />
+      )}
 
       {!isFullscreenView && (
         <Box
