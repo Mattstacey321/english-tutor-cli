@@ -65,7 +65,11 @@ export const availableModes: PracticeMode[] = [
 export type CommandDefinition = {
   command: string;
   description: string;
-  handle: (value: string, ctx: CommandContext, actions: CommandActions) => CommandResult;
+  handle: (
+    value: string,
+    ctx: CommandContext,
+    actions: CommandActions,
+  ) => CommandResult;
   isPaletteCommand?: boolean;
   getDisabledReason?: (ctx: CommandPaletteContext) => string | null;
   getArgHints?: () => CommandArgHint[];
@@ -125,13 +129,14 @@ const statsArgHint = (): CommandArgHint[] => [
   { left: "month", right: "Monthly stats" },
 ];
 
-
 export const commandRegistry: CommandDefinition[] = [
   {
     command: "/help",
     description: "Show help",
     handle: () => {
-      const available = commandRegistry.map((entry) => entry.command).join(", ");
+      const available = commandRegistry
+        .map((entry) => entry.command)
+        .join(", ");
       return {
         message: `Commands: ${available}\nTip: To send a message starting with /, type //`,
       };
@@ -163,7 +168,8 @@ export const commandRegistry: CommandDefinition[] = [
       const configValue = args.slice(1).join(" ");
 
       if (!key) {
-        const summaryModelDisplay = ctx.resolvedConfig.summaryModel ?? "(same as main)";
+        const summaryModelDisplay =
+          ctx.resolvedConfig.summaryModel ?? "(same as main)";
         return {
           message: `Current Configuration:\n\n  Provider: ${ctx.resolvedConfig.provider}\n  Model: ${ctx.resolvedConfig.model}\n  Summary Model: ${summaryModelDisplay}\n  Config Path: ${ctx.configState.path}\n\nUse /config <key> <value> to change settings.\nKeys: summary-model`,
         };
@@ -446,7 +452,7 @@ export const commandRegistry: CommandDefinition[] = [
       if (args.length === 0) {
         return {
           message:
-            "Usage: /save <word1, word2, ...> [collection] [--def \"definition\"]\nExample: /save apple, banana, cherry fruits\nExample: /save vocabulary --def \"a list of words\"\n\nNote: Without --def, definitions are fetched from the AI.",
+            'Usage: /save <word1, word2, ...> [collection] [--def "definition"]\nExample: /save apple, banana, cherry fruits\nExample: /save vocabulary --def "a list of words"\n\nNote: Without --def, definitions are fetched from the AI.',
           isError: true,
         };
       }
@@ -454,9 +460,12 @@ export const commandRegistry: CommandDefinition[] = [
       const defIndex = args.findIndex((a) => a === "--def");
       let manualDef: string | undefined;
       let remainingArgs = args;
-      
+
       if (defIndex !== -1) {
-        manualDef = args.slice(defIndex + 1).join(" ").replace(/^"|"$/g, "");
+        manualDef = args
+          .slice(defIndex + 1)
+          .join(" ")
+          .replace(/^"|"$/g, "");
         remainingArgs = args.slice(0, defIndex);
       }
 
@@ -481,17 +490,26 @@ export const commandRegistry: CommandDefinition[] = [
 
       if (manualDef && words.length > 1) {
         return {
-          message: "The --def flag can only be used with a single word.\nExample: /save word --def \"definition\"",
+          message:
+            'The --def flag can only be used with a single word.\nExample: /save word --def "definition"',
           isError: true,
         };
       }
 
       if (manualDef && words.length === 1) {
-        const result = saveVocabItem(words[0], { definition: manualDef, collection });
+        const result = saveVocabItem(words[0], {
+          definition: manualDef,
+          collection,
+        });
         if (result.saved) {
-          return { message: `Saved "${result.word}" with definition to "${collection}" collection.` };
+          return {
+            message: `Saved "${result.word}" with definition to "${collection}" collection.`,
+          };
         }
-        return { message: `Failed to save "${result.word}": ${result.reason}`, isError: true };
+        return {
+          message: `Failed to save "${result.word}": ${result.reason}`,
+          isError: true,
+        };
       }
 
       const provider = ctx.provider;
@@ -506,23 +524,25 @@ export const commandRegistry: CommandDefinition[] = [
             word: w,
             definition: definitions.get(w.toLowerCase()),
           }));
-          
+
           const { success, failed } = saveVocabItemsWithDefs(items, collection);
-          
+
           let message = `Saved ${success.length} word${success.length !== 1 ? "s" : ""} to "${collection}" collection.`;
-          
+
           const withDef = success.filter((s) => s.definition);
           const withoutDef = success.filter((s) => !s.definition);
-          
+
           if (withoutDef.length > 0) {
             message += `\n\nNote: ${withoutDef.length} word(s) saved without definition (AI couldn't fetch definitions).`;
           }
-          
+
           if (failed.length > 0) {
-            const failedList = failed.map((f) => `${f.word}: ${f.reason}`).join(", ");
+            const failedList = failed
+              .map((f) => `${f.word}: ${f.reason}`)
+              .join(", ");
             message += `\n\nFailed to save: ${failedList}`;
           }
-          
+
           actions.addMessage({
             role: "assistant",
             content: message,
@@ -551,7 +571,9 @@ export const commandRegistry: CommandDefinition[] = [
 
       if (!subcommand || subcommand === "list") {
         const collection = args[1];
-        const items = collection ? getVocabByCollection(collection) : getAllVocab(50);
+        const items = collection
+          ? getVocabByCollection(collection)
+          : getAllVocab(50);
 
         if (items.length === 0) {
           return {
@@ -561,11 +583,16 @@ export const commandRegistry: CommandDefinition[] = [
           };
         }
 
-        const grouped = new Map<string, { word: string; definition: string | null }[]>();
+        const grouped = new Map<
+          string,
+          { word: string; definition: string | null }[]
+        >();
         for (const item of items) {
           const col = item.collection;
           if (!grouped.has(col)) grouped.set(col, []);
-          grouped.get(col)!.push({ word: item.word, definition: item.definition });
+          grouped
+            .get(col)!
+            .push({ word: item.word, definition: item.definition });
         }
 
         const lines: string[] = [];
@@ -593,7 +620,8 @@ export const commandRegistry: CommandDefinition[] = [
         const collections = getCollections();
         if (collections.length === 0) {
           return {
-            message: "No collections yet. Words are saved to 'default' collection.",
+            message:
+              "No collections yet. Words are saved to 'default' collection.",
           };
         }
         const lines = collections.map(
@@ -606,8 +634,12 @@ export const commandRegistry: CommandDefinition[] = [
         const hasTypeFlag = args.includes("--type");
         const hasMcFlag = args.includes("--mc");
         const hasNoDefFlag = args.includes("--no-def");
-        const mode = hasMcFlag ? "multiple-choice" : hasTypeFlag ? "type-answer" : "flashcard";
-        
+        const mode = hasMcFlag
+          ? "multiple-choice"
+          : hasTypeFlag
+            ? "type-answer"
+            : "flashcard";
+
         const collection = args.slice(1).find((arg) => !arg.startsWith("--"));
         const allPracticeItems = getVocabForPractice(collection, 10);
 
@@ -622,17 +654,17 @@ export const commandRegistry: CommandDefinition[] = [
 
         let practiceItems = allPracticeItems;
         const wordsWithoutDef = allPracticeItems.filter((w) => !w.definition);
-        
+
         if (mode === "type-answer" || mode === "multiple-choice") {
           practiceItems = allPracticeItems.filter((w) => w.definition);
-          
+
           if (practiceItems.length === 0) {
             return {
               message: `No words with definitions found for "${mode}" mode.\n\nAll ${allPracticeItems.length} word(s) lack definitions.\nUse /save word --def "definition" to add definitions.`,
               isError: true,
             };
           }
-          
+
           if (wordsWithoutDef.length > 0) {
             return {
               message: `Warning: ${wordsWithoutDef.length} of ${allPracticeItems.length} words have no definition and will be skipped.\n\nUsing ${practiceItems.length} words with definitions for "${mode}" mode.`,
@@ -646,7 +678,7 @@ export const commandRegistry: CommandDefinition[] = [
               isError: true,
             };
           }
-          
+
           if (wordsWithoutDef.length > 0 && hasNoDefFlag) {
             practiceItems = allPracticeItems.filter((w) => w.definition);
           }
@@ -654,7 +686,8 @@ export const commandRegistry: CommandDefinition[] = [
 
         if (mode === "multiple-choice" && practiceItems.length < 4) {
           return {
-            message: "Multiple-choice mode requires at least 4 vocabulary words with definitions.",
+            message:
+              "Multiple-choice mode requires at least 4 vocabulary words with definitions.",
             isError: true,
           };
         }
@@ -709,7 +742,7 @@ export const commandRegistry: CommandDefinition[] = [
   {
     command: "/stats",
     description: "View learning statistics",
-    handle: (_value, _ctx, _actions) => {
+    handle: (_, __, ___) => {
       const stats = getLearningStats();
 
       const sessionLines = [
@@ -819,7 +852,9 @@ export const getCommandArgHints = (command: string): CommandArgHint[] => {
 export const getKnownCommands = (): string[] =>
   commandRegistry.map((entry) => entry.command);
 
-export const getCommandByName = (command: string): CommandDefinition | undefined =>
+export const getCommandByName = (
+  command: string,
+): CommandDefinition | undefined =>
   commandRegistry.find((entry) => entry.command === command);
 
 export interface CommandContext {
