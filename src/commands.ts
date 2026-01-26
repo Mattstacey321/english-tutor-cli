@@ -666,10 +666,10 @@ export const commandRegistry: CommandDefinition[] = [
           }
 
           if (wordsWithoutDef.length > 0) {
-            return {
-              message: `Warning: ${wordsWithoutDef.length} of ${allPracticeItems.length} words have no definition and will be skipped.\n\nUsing ${practiceItems.length} words with definitions for "${mode}" mode.`,
-              isError: false,
-            };
+            actions.addMessage({
+              role: "system",
+              content: `(Tip) Warning: ${wordsWithoutDef.length} of ${allPracticeItems.length} words have no definition and will be skipped.\n\nUsing ${practiceItems.length} words with definitions for "${mode}" mode.`,
+            });
           }
         } else if (mode === "flashcard") {
           if (wordsWithoutDef.length > 0 && !hasNoDefFlag) {

@@ -184,6 +184,48 @@ describe('handleCommand', () => {
     });
   });
 
+  describe('/vocab practice', () => {
+    it('starts type-answer practice and emits a tip when some words lack definitions', async () => {
+      const storage = await import('../src/storage.js');
+      const getVocabForPracticeMock = vi.mocked(storage.getVocabForPractice);
+
+      getVocabForPracticeMock.mockReturnValue([
+        { id: 1, word: 'alpha', definition: 'first letter', collection: 'default' } as any,
+        { id: 2, word: 'beta', definition: 'second letter', collection: 'default' } as any,
+        { id: 3, word: 'gamma', definition: null, collection: 'default' } as any,
+        { id: 4, word: 'delta', definition: null, collection: 'default' } as any,
+        { id: 5, word: 'epsilon', definition: null, collection: 'default' } as any,
+        { id: 6, word: 'zeta', definition: null, collection: 'default' } as any,
+        { id: 7, word: 'eta', definition: null, collection: 'default' } as any,
+        { id: 8, word: 'theta', definition: null, collection: 'default' } as any,
+        { id: 9, word: 'iota', definition: null, collection: 'default' } as any,
+        { id: 10, word: 'kappa', definition: null, collection: 'default' } as any,
+      ]);
+
+      const result = handleCommand('/vocab practice --type', mockCtx, mockActions);
+      expect(result).toBe(null);
+
+      expect(mockActions.addMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          role: 'system',
+          content: expect.stringContaining('(Tip) Warning: 8 of 10 words have no definition and will be skipped.'),
+        }),
+      );
+
+      expect(mockActions.setMainView).toHaveBeenCalledWith('vocabPractice');
+      expect(mockActions.setVocabPractice).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: 'type-answer',
+        }),
+      );
+
+      const setArg = vi.mocked(mockActions.setVocabPractice).mock.calls[0]?.[0] as any;
+      expect(setArg.items).toHaveLength(2);
+      expect(setArg.items[0]?.definition).toBeTruthy();
+      expect(setArg.items[1]?.definition).toBeTruthy();
+    });
+  });
+
   describe('unknown command', () => {
     it('returns error for unknown command', () => {
       const result = handleCommand('/unknown', mockCtx, mockActions);

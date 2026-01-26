@@ -261,6 +261,22 @@ export const useTutorStore = create<TutorState>((set) => ({
       if (!state.vocabPractice) return {};
       const nextIndex = state.vocabPractice.currentIndex + 1;
       if (nextIndex >= state.vocabPractice.items.length) {
+        const { correct, incorrect } = state.vocabPractice.score;
+        const total = correct + incorrect;
+        if (total > 0) {
+          return {
+            mainView: "chat",
+            vocabPractice: null,
+            history: [
+              ...state.history,
+              {
+                id: randomUUID(),
+                role: "assistant",
+                content: `(Tip) Practice ended. Score: ${correct}/${total} correct.`,
+              },
+            ],
+          };
+        }
         return { mainView: "chat", vocabPractice: null };
       }
       return {
