@@ -124,6 +124,13 @@ const vocabArgHint = (): CommandArgHint[] => [
   { left: "practice [collection]", right: "Start practice" },
 ];
 
+const vocabPracticeArgHint = (): CommandArgHint[] => [
+  { left: "[collection]", right: "Practice specific collection" },
+  { left: "--type", right: "Type-the-answer mode" },
+  { left: "--mc", right: "Multiple-choice mode" },
+  { left: "--no-def", right: "Allow words without definitions" },
+];
+
 const statsArgHint = (): CommandArgHint[] => [
   { left: "week", right: "Weekly stats" },
   { left: "month", right: "Monthly stats" },
@@ -847,6 +854,20 @@ export const getPaletteItems = (
 export const getCommandArgHints = (command: string): CommandArgHint[] => {
   const entry = commandRegistry.find((item) => item.command === command);
   return entry?.getArgHints?.() ?? [];
+};
+
+export const getContextAwareArgHints = (input: string): CommandArgHint[] => {
+  const tokens = input.trim().split(/\s+/).filter(Boolean);
+  const baseCommand = tokens[0];
+  const firstArg = tokens[1];
+
+  // Check if this is /vocab practice context
+  if (baseCommand === "/vocab" && firstArg === "practice") {
+    return vocabPracticeArgHint();
+  }
+
+  // Fall back to standard command hints
+  return getCommandArgHints(baseCommand);
 };
 
 export const getKnownCommands = (): string[] =>
