@@ -7,6 +7,7 @@ import { updateDifficulty } from "./adaptive.js";
 import {
   availableModes,
   getCommandArgHints,
+  getContextAwareArgHints,
   getKnownCommands,
   getPaletteItems,
   handleCommand,
@@ -322,16 +323,22 @@ const App = () => {
     if (input.startsWith("/") && !input.startsWith("//")) {
       const commandKey = input.split(/\s+/)[0]?.toLowerCase();
       if (input.includes(" ")) {
-        return (
-          commandArgHints[commandKey] ?? [
-            {
-              id: "no-arg-hints",
-              left: "(none)",
-              right: "No argument tips available",
+        const contextHints = getContextAwareArgHints(input);
+        return contextHints.length > 0
+          ? contextHints.map((hint, index) => ({
+              id: `${commandKey}-hint-${index}`,
+              left: hint.left,
+              right: hint.right,
               disabled: true,
-            },
-          ]
-        );
+            }))
+          : [
+              {
+                id: "no-arg-hints",
+                left: "(none)",
+                right: "No argument tips available",
+                disabled: true,
+              },
+            ];
       }
 
       const query = input.toLowerCase();
