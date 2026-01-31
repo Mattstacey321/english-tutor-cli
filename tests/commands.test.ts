@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { handleCommand, availableModes, type CommandContext, type CommandActions } from '../src/commands.js';
+import { handleCommand, availableModes, getContextAwareArgHints, type CommandContext, type CommandActions } from '../src/commands.js';
 import type { ResolvedConfig } from '../src/config.js';
 
 vi.mock('../src/storage.js', () => ({
@@ -243,5 +243,56 @@ describe('availableModes', () => {
     expect(availableModes).toContain('role-play');
     expect(availableModes).toContain('fluency');
     expect(availableModes).toContain('exam');
+  });
+});
+
+describe('getContextAwareArgHints', () => {
+  it('returns vocab subcommands for /vocab ', () => {
+    const hints = getContextAwareArgHints('/vocab ');
+    const leftValues = hints.map(h => h.left);
+    expect(leftValues).toContain('list [collection]');
+    expect(leftValues).toContain('stats');
+    expect(leftValues).toContain('collections');
+    expect(leftValues).toContain('practice [collection]');
+  });
+
+  it('returns practice flags for /vocab practice ', () => {
+    const hints = getContextAwareArgHints('/vocab practice ');
+    const leftValues = hints.map(h => h.left);
+    expect(leftValues).toContain('[collection]');
+    expect(leftValues).toContain('--type');
+    expect(leftValues).toContain('--mc');
+    expect(leftValues).toContain('--no-def');
+  });
+
+  it('returns practice flags for /vocab practice (no trailing space)', () => {
+    const hints = getContextAwareArgHints('/vocab practice');
+    const leftValues = hints.map(h => h.left);
+    expect(leftValues).toContain('[collection]');
+    expect(leftValues).toContain('--type');
+    expect(leftValues).toContain('--mc');
+    expect(leftValues).toContain('--no-def');
+  });
+
+  it('does not return practice flags for /vocab list ', () => {
+    const hints = getContextAwareArgHints('/vocab list ');
+    const leftValues = hints.map(h => h.left);
+    expect(leftValues).not.toContain('--type');
+    expect(leftValues).not.toContain('--mc');
+    expect(leftValues).not.toContain('--no-def');
+  });
+
+  it('returns clear hints for /clear --new-session (unchanged behavior)', () => {
+    const hints = getContextAwareArgHints('/clear --new-session');
+    const leftValues = hints.map(h => h.left);
+    expect(leftValues).toContain('--new-session');
+  });
+
+  it('returns mode hints for /mode (unchanged behavior)', () => {
+    const hints = getContextAwareArgHints('/mode ');
+    const leftValues = hints.map(h => h.left);
+    expect(leftValues).toContain('general');
+    expect(leftValues).toContain('grammar');
+    expect(leftValues).toContain('vocab');
   });
 });
