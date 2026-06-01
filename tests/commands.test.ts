@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleCommand, availableModes, getContextAwareArgHints, type CommandContext, type CommandActions } from '../src/commands.js';
+import type { VocabItem } from '../src/storage.js';
 import type { ResolvedConfig } from '../src/config.js';
 
 vi.mock('../src/storage.js', () => ({
@@ -40,6 +41,15 @@ vi.mock('../src/summary.js', () => ({
 describe('handleCommand', () => {
   let mockCtx: CommandContext;
   let mockActions: CommandActions;
+
+  const vocabItem = (item: Pick<VocabItem, 'id' | 'word' | 'definition' | 'collection'>): VocabItem => ({
+    ...item,
+    example: null,
+    mastery_level: 0,
+    times_reviewed: 0,
+    last_reviewed_at: null,
+    created_at: '2026-01-20T00:00:00.000Z',
+  });
 
   beforeEach(() => {
     const resolvedConfig: ResolvedConfig = {
@@ -190,16 +200,16 @@ describe('handleCommand', () => {
       const getVocabForPracticeMock = vi.mocked(storage.getVocabForPractice);
 
       getVocabForPracticeMock.mockReturnValue([
-        { id: 1, word: 'alpha', definition: 'first letter', collection: 'default' } as any,
-        { id: 2, word: 'beta', definition: 'second letter', collection: 'default' } as any,
-        { id: 3, word: 'gamma', definition: null, collection: 'default' } as any,
-        { id: 4, word: 'delta', definition: null, collection: 'default' } as any,
-        { id: 5, word: 'epsilon', definition: null, collection: 'default' } as any,
-        { id: 6, word: 'zeta', definition: null, collection: 'default' } as any,
-        { id: 7, word: 'eta', definition: null, collection: 'default' } as any,
-        { id: 8, word: 'theta', definition: null, collection: 'default' } as any,
-        { id: 9, word: 'iota', definition: null, collection: 'default' } as any,
-        { id: 10, word: 'kappa', definition: null, collection: 'default' } as any,
+        vocabItem({ id: 1, word: 'alpha', definition: 'first letter', collection: 'default' }),
+        vocabItem({ id: 2, word: 'beta', definition: 'second letter', collection: 'default' }),
+        vocabItem({ id: 3, word: 'gamma', definition: null, collection: 'default' }),
+        vocabItem({ id: 4, word: 'delta', definition: null, collection: 'default' }),
+        vocabItem({ id: 5, word: 'epsilon', definition: null, collection: 'default' }),
+        vocabItem({ id: 6, word: 'zeta', definition: null, collection: 'default' }),
+        vocabItem({ id: 7, word: 'eta', definition: null, collection: 'default' }),
+        vocabItem({ id: 8, word: 'theta', definition: null, collection: 'default' }),
+        vocabItem({ id: 9, word: 'iota', definition: null, collection: 'default' }),
+        vocabItem({ id: 10, word: 'kappa', definition: null, collection: 'default' }),
       ]);
 
       const result = handleCommand('/vocab practice --type', mockCtx, mockActions);
@@ -219,7 +229,7 @@ describe('handleCommand', () => {
         }),
       );
 
-      const setArg = vi.mocked(mockActions.setVocabPractice).mock.calls[0]?.[0] as any;
+      const setArg = vi.mocked(mockActions.setVocabPractice).mock.calls[0]?.[0] as NonNullable<Parameters<CommandActions['setVocabPractice']>[0]>;
       expect(setArg.items).toHaveLength(2);
       expect(setArg.items[0]?.definition).toBeTruthy();
       expect(setArg.items[1]?.definition).toBeTruthy();

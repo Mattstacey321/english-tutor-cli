@@ -1,6 +1,11 @@
 {
   "name": "english-tutor-cli",
   "version": "0.1.0",
+  "license": "MIT",
+  "packageManager": "pnpm@11.3.0",
+  "engines": {
+    "node": ">=18"
+  },
   "type": "module",
   "bin": {
     "english-tutor": "dist/index.js"

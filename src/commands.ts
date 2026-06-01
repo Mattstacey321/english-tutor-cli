@@ -20,7 +20,6 @@ import {
   getVocabForPractice,
   getVocabDistractors,
   getLearningStats,
-  isValidWord,
 } from "./storage.js";
 import { fetchDefinitions } from "./vocab-definitions.js";
 import {
@@ -536,7 +535,6 @@ export const commandRegistry: CommandDefinition[] = [
 
           let message = `Saved ${success.length} word${success.length !== 1 ? "s" : ""} to "${collection}" collection.`;
 
-          const withDef = success.filter((s) => s.definition);
           const withoutDef = success.filter((s) => !s.definition);
 
           if (withoutDef.length > 0) {

@@ -7,8 +7,8 @@ An interactive TUI app for practicing English with an AI tutor. It supports Open
 Local dev:
 
 ```bash
-npm install
-OPENAI_API_KEY=your_key_here npm run dev
+pnpm install
+OPENAI_API_KEY=your_key_here pnpm run dev
 ```
 
 Docker (self-host):
@@ -20,7 +20,7 @@ docker compose up
 ## Install
 
 ```bash
-npm install
+pnpm install
 ```
 
 ## Usage
@@ -28,14 +28,14 @@ npm install
 Run the TUI:
 
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 Build and run the compiled CLI:
 
 ```bash
-npm run build
-npm run start
+pnpm run build
+pnpm run start
 ```
 
 Once built, you can also run:
@@ -67,19 +67,21 @@ Docker compose passes `DB_PATH=/data/tutor.db` and uses a named volume.
 
 ## Scripts
 
-- `npm run dev` start TUI in dev mode
-- `npm run build` bundle to `dist/`
-- `npm run start` run compiled output
-- `npm run lint` lint code
-- `npm run typecheck` run TypeScript checks
-- `npm run test` run unit tests
+| Command | Description |
+|---------|-------------|
+| `pnpm run dev` | Start TUI in dev mode |
+| `pnpm run build` | Bundle to `dist/` |
+| `pnpm run start` | Run compiled output |
+| `pnpm run lint` | Lint code |
+| `pnpm run typecheck` | Run TypeScript checks |
+| `pnpm run test` | Run unit tests |
 
 ## Testing
 
 ```bash
-npm run lint
-npm run typecheck
-npm run test
+pnpm run lint
+pnpm run typecheck
+pnpm run test
 ```
 
 ## Troubleshooting
@@ -90,8 +92,8 @@ npm run test
 
 ## Contributing
 
-TODO: Add contribution guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, scripts, and code style guidelines.
 
 ## License
 
-TODO: Add license.
+MIT — see [LICENSE](LICENSE) for the full text.
